@@ -12,6 +12,12 @@ app.use(express.json()); // Parse JSON bodies
 // Routes
 app.use('/api/auth', authRoutes);
 
+// /route for testing
+app.get('/', (req, res) => {
+  res.send('Welcome to the Authentication API!');
+});
+
+
 // MongoDB connection
 const connectDB = async () => {
   try {
