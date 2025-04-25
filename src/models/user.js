@@ -28,7 +28,6 @@ const UserSchema = new mongoose.Schema({
   // Confirm password will not be saved, just for validation during signup
   confirmPassword: {
     type: String,
-    required: true,
   }
 });
 
