@@ -27,7 +27,7 @@ exports.googleLogin = async (req, res) => {
     const googleId = payload.sub;
     const email = payload.email;
     const loginType = 'google';
-    const phoneNumber = payload.phoneNumber || null; // Google doesn't provide phone number by default
+    const username = payload.email ; // Google doesn't provide phone number by default
 
 
     // Check if the user already exists
@@ -40,7 +40,9 @@ exports.googleLogin = async (req, res) => {
         googleId,
         email,
         loginType,
-        phoneNumber,
+       
+        username,
+     
       });
       await user.save();
     }
