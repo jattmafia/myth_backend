@@ -5,6 +5,60 @@ const Otp = require('../models/otp');
 const nodemailer = require('nodemailer');
 
 
+const { OAuth2Client } = require('google-auth-library');
+
+const client = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
+
+exports.googleLogin = async (req, res) => {
+  const { idToken } = req.body;
+
+  if (!idToken) {
+    return res.status(400).json({ message: 'ID Token is required' });
+  }
+
+  try {
+    // Verify the ID token
+    const ticket = await client.verifyIdToken({
+      idToken,
+      audience: process.env.GOOGLE_CLIENT_ID,
+    });
+
+    const payload = ticket.getPayload();
+    const googleId = payload.sub;
+    const email = payload.email;
+    const loginType = 'google';
+    const phoneNumber = payload.phoneNumber || null; // Google doesn't provide phone number by default
+
+
+    // Check if the user already exists
+    let user = await User.findOne({ email });
+
+
+    if (!user) {
+      // If user doesn't exist, create a new one
+      user = new User({
+        googleId,
+        email,
+        loginType,
+        phoneNumber,
+      });
+      await user.save();
+    }
+
+    if (user.loginType !== 'google') {
+      return res.status(400).json({ message: 'User already registered with email' });
+    }
+
+    // Generate a JWT token
+    const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET, {
+    });
+
+    res.status(200).json({ message: 'Google login successful', token, user });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: 'Failed to authenticate with Google' });
+  }
+};
 
 
 
@@ -112,11 +166,24 @@ exports.requestPasswordReset = async (req, res) => {
       },
     });
 
+    const emailContent = `
+    <p>Hi Dear User,</p>
+    <p>Welcome to <strong>Mytho Novel</strong>!</p>
+    <p>Your One-Time Password (OTP) for account verification is:</p>
+    <h2>${otp}</h2>
+    <p>This OTP is valid for the next <strong>5 minutes</strong>. Please do not share this code with anyone.</p>
+    <p>If you did not request this OTP, please ignore this email.</p>
+    <br>
+    <p>Thank you for choosing <strong>Mytho Novel</strong> – Where Stories Come Alive!</p>
+    <br>
+    <p>---<br>Stay connected,<br>The Mytho Novel Team</p>
+  `;
+
     await transporter.sendMail({
       from: process.env.EMAIL_USER,
       to: email,
       subject: 'Password Reset OTP',
-      text: `Your OTP for password reset is ${otp}. It is valid for 5 minutes.`,
+      html: emailContent,
     });
 
     res.status(200).json({ message: 'OTP sent to email' });

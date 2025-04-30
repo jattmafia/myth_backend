@@ -5,7 +5,6 @@ const bcrypt = require('bcryptjs'); // For hashing passwords
 const UserSchema = new mongoose.Schema({
   username: {
     type: String,
-    required: true,
     unique: true,
     trim: true,
   },
@@ -18,17 +17,21 @@ const UserSchema = new mongoose.Schema({
   },
   phoneNumber: {
     type: String,
-    required: true,
     unique: true,
   },
   password: {
     type: String,
-    required: true,
   },
   // Confirm password will not be saved, just for validation during signup
   confirmPassword: {
     type: String,
-  }
+  },
+  loginType: {
+    type: String,
+    enum: ['email', 'google'],
+    default: 'email',
+  },
+
 });
 
 // Password hashing before saving to DB
