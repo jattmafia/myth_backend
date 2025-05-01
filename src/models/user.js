@@ -32,6 +32,19 @@ const UserSchema = new mongoose.Schema({
     enum: ['email', 'google'],
     default: 'email',
   },
+  createdAt: {
+    type: Date,
+    default: Date.now,
+  },
+  deviceName: {
+    type: String,
+    sparse: true
+  },
+  deviceId: {
+    type: String,
+    sparse: true
+  },
+
 
 });
 

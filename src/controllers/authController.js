@@ -319,7 +319,7 @@ exports.loginUser = async (req, res) => {
 };
 // Handle user signup
 exports.signupUser = async (req, res) => {
-  const { username, email, phoneNumber, password, confirmPassword } = req.body;
+  const { username, email, phoneNumber, password, confirmPassword, deviceId, deviceName } = req.body;
 
   // Validation
   if (!username || !email || !phoneNumber || !password || !confirmPassword) {
@@ -344,6 +344,8 @@ exports.signupUser = async (req, res) => {
       phoneNumber,
       password,
       confirmPassword,
+      deviceId,
+      deviceName,
     });
 
     // Save the user to the database
