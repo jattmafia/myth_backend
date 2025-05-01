@@ -168,24 +168,13 @@ exports.requestPasswordReset = async (req, res) => {
       },
     });
 
-    const emailContent = `
-    <p>Hi Dear User,</p>
-    <p>Welcome to <strong>Mytho Novel</strong>!</p>
-    <p>Your One-Time Password (OTP) for account verification is:</p>
-    <h2>${otp}</h2>
-    <p>This OTP is valid for the next <strong>5 minutes</strong>. Please do not share this code with anyone.</p>
-    <p>If you did not request this OTP, please ignore this email.</p>
-    <br>
-    <p>Thank you for choosing <strong>Mytho Novel</strong> – Where Stories Come Alive!</p>
-    <br>
-    <p>---<br>Stay connected,<br>The Mytho Novel Team</p>
-  `;
+   
 
     await transporter.sendMail({
       from: process.env.EMAIL_USER,
       to: email,
       subject: 'Password Reset OTP',
-      html: emailContent,
+      text: `Your OTP for password reset is ${otp}. It is valid for 5 minutes.`,
     });
 
     res.status(200).json({ message: 'OTP sent to email' });
@@ -231,7 +220,18 @@ exports.sendOtp = async (req, res) => {
       // Create a new OTP entry
       await Otp.create({ email, otp, expiresAt });
     }
-
+    const emailContent = `
+    <p>Hi Dear User,</p>
+    <p>Welcome to <strong>Mytho Novel</strong>!</p>
+    <p>Your One-Time Password (OTP) for account verification is:</p>
+    <h2>${otp}</h2>
+    <p>This OTP is valid for the next <strong>5 minutes</strong>. Please do not share this code with anyone.</p>
+    <p>If you did not request this OTP, please ignore this email.</p>
+    <br>
+    <p>Thank you for choosing <strong>Mytho Novel</strong> – Where Stories Come Alive!</p>
+    <br>
+    <p>---<br>Stay connected,<br>The Mytho Novel Team</p>
+  `;
     // Configure nodemailer and send the OTP
     const transporter = nodemailer.createTransport({
       host: 'smtp.hostinger.com',
@@ -247,7 +247,7 @@ exports.sendOtp = async (req, res) => {
       from: process.env.EMAIL_USER,
       to: email,
       subject: 'Your OTP for Email Verification',
-      text: `Your OTP is ${otp}. It is valid for 5 minutes.`,
+      html: emailContent,
     });
 
     res.status(200).json({ message: 'OTP sent to email' });
