@@ -10,7 +10,7 @@ const { OAuth2Client } = require('google-auth-library');
 const client = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 
 exports.googleLogin = async (req, res) => {
-  const { idToken } = req.body;
+  const { idToken,deviceId,deviceName } = req.body;
 
   if (!idToken) {
     return res.status(400).json({ message: 'ID Token is required' });
@@ -40,7 +40,8 @@ exports.googleLogin = async (req, res) => {
         googleId,
         email,
         loginType,
-       
+        deviceId,
+        deviceName,
         username,
      
       });
@@ -140,6 +141,8 @@ exports.requestPasswordReset = async (req, res) => {
     if (!user) {
       return res.status(404).json({ message: 'User not found' });
     }
+    if(user.loginType !== 'email'){
+      return res.status(400).json({ message: 'User is not registered with email' });}
 
     // Generate a 6-digit OTP
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
