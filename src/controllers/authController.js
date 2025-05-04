@@ -10,7 +10,7 @@ const { OAuth2Client } = require('google-auth-library');
 const client = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 
 exports.googleLogin = async (req, res) => {
-  const { idToken,deviceId,deviceName } = req.body;
+  const { idToken, deviceId, deviceName } = req.body;
 
   if (!idToken) {
     return res.status(400).json({ message: 'ID Token is required' });
@@ -27,7 +27,7 @@ exports.googleLogin = async (req, res) => {
     const googleId = payload.sub;
     const email = payload.email;
     const loginType = 'google';
-    const username = payload.email ; // Google doesn't provide phone number by default
+    const username = payload.email; // Google doesn't provide phone number by default
 
 
     // Check if the user already exists
@@ -43,7 +43,7 @@ exports.googleLogin = async (req, res) => {
         deviceId,
         deviceName,
         username,
-     
+
       });
       await user.save();
     }
@@ -86,11 +86,8 @@ exports.resetPassword = async (req, res) => {
       return res.status(404).json({ message: 'User not found' });
     }
 
-    // Hash the new password
-    const hashedPassword = await bcrypt.hash(newPassword, 10);
-
-    // Update the user's password
-    user.password = hashedPassword;
+    user.password = newPassword;
+    user.confirmPassword = confirmPassword; // This field is not necessary for the user model, but included for consistency
     await user.save();
 
     res.status(200).json({ message: 'Password reset successfully' });
@@ -141,8 +138,9 @@ exports.requestPasswordReset = async (req, res) => {
     if (!user) {
       return res.status(404).json({ message: 'User not found' });
     }
-    if(user.loginType !== 'email'){
-      return res.status(400).json({ message: 'User is not registered with email' });}
+    if (user.loginType !== 'email') {
+      return res.status(400).json({ message: 'User is not registered with email' });
+    }
 
     // Generate a 6-digit OTP
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
@@ -171,7 +169,7 @@ exports.requestPasswordReset = async (req, res) => {
       },
     });
 
-   
+
 
     await transporter.sendMail({
       from: process.env.EMAIL_USER,
