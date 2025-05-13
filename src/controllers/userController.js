@@ -10,7 +10,7 @@ const s3 = new AWS.S3({
 });
 
 exports.createProfile = async (req, res) => {
-  const { fullName, dob, gender, country, contentLanguage } = req.body;
+  const { fullName, dob, gender, country, contentLanguage, username } = req.body;
   const profilePicture = req.file; // Assuming you're using multer for file uploads
 
   //   if (!name || !age || !bio || !profilePicture) {
@@ -22,6 +22,10 @@ exports.createProfile = async (req, res) => {
     const user = await User.findById(req.user.id);
     if (!user) {
       return res.status(404).json({ message: 'User not found' });
+    }
+    const userExists = await User.findOne({ $or: [{ username }] });
+    if (userExists && userExists._id.toString() !== req.user.id) {
+      return res.status(400).json({ message: 'Username already exists' });
     }
 
     if (profilePicture) {
@@ -45,18 +49,19 @@ exports.createProfile = async (req, res) => {
       user.gender = gender;
       user.country = country;
       user.contentLanguage = contentLanguage;
-
+      user.username = username
 
 
       await user.save();
 
-      res.status(200).json({ message: 'Profile created successfully', user });
+      res.status(200).json({ message: 'Profile created successfully' });
     } else {
       user.fullName = fullName;
       user.dob = dob;
       user.gender = gender;
       user.country = country;
       user.contentLanguage = contentLanguage;
+      user.username = username
       await user.save();
       res.status(200).json({ message: 'Profile created successfully', user });
     }
