@@ -2,6 +2,8 @@ const express = require('express');
 const mongoose = require('mongoose');
 require('dotenv').config();
 const authRoutes = require('./routes/auth');
+const userRoutes = require('./routes/user_route');
+const { use } = require('passport');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -11,6 +13,7 @@ app.use(express.json()); // Parse JSON bodies
 
 // Routes
 app.use('/api/auth', authRoutes);
+app.use('/api/user', userRoutes);
 
 // /route for testing
 app.get('/', (req, res) => {

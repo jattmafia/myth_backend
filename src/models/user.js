@@ -8,6 +8,10 @@ const UserSchema = new mongoose.Schema({
     unique: true,
     trim: true,
   },
+  profilePicture: {
+    type: String,
+    required: false,
+  },
   email: {
     type: String,
     required: true,
@@ -44,12 +48,31 @@ const UserSchema = new mongoose.Schema({
     type: String,
     sparse: true
   },
-
+  fullName: {
+    type: String,
+    required: false,
+  },
+  dob: {
+    type: Date,
+    required: false,
+  },
+  gender: {
+    type: String,
+    required: false,
+  },
+  country: {
+    type: String,
+    required: false,
+  },
+  contentLanguage: {
+    type: Array,
+    required: false,
+  },
 
 });
 
 // Password hashing before saving to DB
-UserSchema.pre('save', async function(next) {
+UserSchema.pre('save', async function (next) {
   if (!this.isModified('password')) {
     return next(); // Skip if password wasn't modified
   }
@@ -66,7 +89,7 @@ UserSchema.pre('save', async function(next) {
 });
 
 // Method to compare password during login
-UserSchema.methods.matchPassword = async function(enteredPassword) {
+UserSchema.methods.matchPassword = async function (enteredPassword) {
   return await bcrypt.compare(enteredPassword, this.password);
 };
 
