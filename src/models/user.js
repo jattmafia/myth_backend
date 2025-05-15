@@ -68,6 +68,10 @@ const UserSchema = new mongoose.Schema({
     type: Array,
     required: false,
   },
+  bio: {
+    type: String,
+    required: false,
+  },
 
 });
 

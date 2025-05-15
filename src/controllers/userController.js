@@ -10,7 +10,7 @@ const s3 = new AWS.S3({
 });
 
 exports.createProfile = async (req, res) => {
-  const { fullName, dob, gender, country, contentLanguage, username } = req.body;
+  const { fullName, dob, gender, country, contentLanguage, username, bio } = req.body;
   const profilePicture = req.file; // Assuming you're using multer for file uploads
 
   //   if (!name || !age || !bio || !profilePicture) {
@@ -49,7 +49,8 @@ exports.createProfile = async (req, res) => {
       user.gender = gender;
       user.country = country;
       user.contentLanguage = contentLanguage;
-      user.username = username
+      user.username = username;
+      user.bio = bio;
 
 
       await user.save();
@@ -61,7 +62,8 @@ exports.createProfile = async (req, res) => {
       user.gender = gender;
       user.country = country;
       user.contentLanguage = contentLanguage;
-      user.username = username
+      user.username = username;
+      user.bio = bio;
       await user.save();
       res.status(200).json({ message: 'Profile created successfully', user });
     }
