@@ -309,8 +309,9 @@ exports.loginUser = async (req, res) => {
 
     // Generate a JWT token
     const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET);
-
-    res.status(200).json({ message: 'Login successful', token });
+const userObj = user.toObject();
+delete userObj.password;
+    res.status(200).json({ message: 'Login successful', token, userObj });
   } catch (error) {
     console.error(error);
     res.status(500).json({ message: 'Server error' });
