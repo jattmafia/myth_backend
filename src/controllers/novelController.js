@@ -16,7 +16,7 @@ exports.createNovel = async (req, res) => {
 
 
     try {
-        const { title, description } = req.body;
+        const { title, description, hookupDescription, language } = req.body;
         const coverImage = req.file;
         const user = await User.findById(req.user.id);
         if (!user) {
@@ -42,7 +42,9 @@ exports.createNovel = async (req, res) => {
             title,
             description,
             coverImage: uploadResult.Key,
-            author: req.user.id
+            author: req.user.id,
+            hookupDescription,
+            language
         });
 
         await newNovel.save();

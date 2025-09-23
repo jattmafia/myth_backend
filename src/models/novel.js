@@ -10,8 +10,15 @@ const NovelSchema = new mongoose.Schema({
     ref: 'User',
     required: true
   },
-  
+  language: {
+    type: String,
+    required: true,
+  },
   coverImage: {
+    type: String,
+    required: true
+  },
+  hookupDescription: {
     type: String,
     required: true
   },
