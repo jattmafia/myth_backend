@@ -20,7 +20,7 @@ app.use('/api/novel', novelRoutes);
 app.use('/api/chapter', chapterRoutes);
 
 // /route for testing
-app.get('/', (req, res) => {
+app.get('/api', (req, res) => {
   res.send('Welcome to the Authentication API!');
 });
 
