@@ -79,3 +79,30 @@ exports.getNovelsByUser = async (req, res) => {
         res.status(500).json({ error: error.message });
     }
 };
+
+//update novel by id
+
+exports.updateNovel = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { title, description, hookupDescription, language } = req.body;
+       
+        const novel = await Novel.findById(id);
+
+        if (!novel) {
+            return res.status(404).json({ message: 'Novel not found' });
+        }
+        if (novel.author.toString() !== req.user.id) {
+            return res.status(403).json({ message: 'Unauthorized' });
+        }
+        if (title) novel.title = title;
+        if (description) novel.description = description;
+        if (hookupDescription) novel.hookupDescription = hookupDescription;
+        if (language) novel.language = language;
+        await novel.save();
+        res.status(200).json(novel);
+    } catch (error) {
+        console.error('Error updating novel:', error);
+        res.status(500).json({ error: error.message });
+    }
+};
