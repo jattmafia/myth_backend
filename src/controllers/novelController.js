@@ -65,3 +65,15 @@ exports.getNovels = async (req, res) => {
         res.status(500).json({ error: error.message });
     }
 };
+
+
+//fetch novel by user id
+exports.getNovelsByUser = async (req, res) => {
+    try {
+        const novels = await Novel.find({ author: req.user.id }).populate('author', 'username');
+        res.status(200).json(novels);
+    } catch (error) {
+        console.error('Error fetching novels by user:', error);
+        res.status(500).json({ error: error.message });
+    }
+};
