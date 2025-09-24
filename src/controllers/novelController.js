@@ -85,8 +85,14 @@ exports.getNovelsByUser = async (req, res) => {
 exports.updateNovel = async (req, res) => {
     try {
         const { id } = req.params;
-        const { title, description, hookupDescription, language,status } = req.body;
-       
+
+        // Check if req.body exists and is not null/undefined
+        if (!req.body || typeof req.body !== 'object') {
+            return res.status(400).json({ message: 'Request body is required and must be valid JSON' });
+        }
+
+        const { title, description, hookupDescription, language, status } = req.body;
+
         const novel = await Novel.findById(id);
 
         if (!novel) {
@@ -95,11 +101,14 @@ exports.updateNovel = async (req, res) => {
         if (novel.author.toString() !== req.user.id) {
             return res.status(403).json({ message: 'Unauthorized' });
         }
-        if (title!= undefined ) novel.title = title;
-        if (description!= undefined ) novel.description = description;
-        if (hookupDescription!= undefined ) novel.hookupDescription = hookupDescription;
-        if (language!= undefined ) novel.language = language;
-        if (status!= undefined ) novel.status = status;
+
+        // Update fields only if they are provided
+        if (title !== undefined) novel.title = title;
+        if (description !== undefined) novel.description = description;
+        if (hookupDescription !== undefined) novel.hookupDescription = hookupDescription;
+        if (language !== undefined) novel.language = language;
+        if (status !== undefined) novel.status = status;
+
         await novel.save();
         res.status(200).json(novel);
     } catch (error) {
