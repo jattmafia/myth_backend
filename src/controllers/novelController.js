@@ -85,7 +85,7 @@ exports.getNovelsByUser = async (req, res) => {
 exports.updateNovel = async (req, res) => {
     try {
         const { id } = req.params;
-        const { title, description, hookupDescription, language } = req.body;
+        const { title, description, hookupDescription, language,status } = req.body;
        
         const novel = await Novel.findById(id);
 
@@ -99,6 +99,7 @@ exports.updateNovel = async (req, res) => {
         if (description) novel.description = description;
         if (hookupDescription) novel.hookupDescription = hookupDescription;
         if (language) novel.language = language;
+        if (status) novel.status = status;
         await novel.save();
         res.status(200).json(novel);
     } catch (error) {
