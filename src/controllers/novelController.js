@@ -84,7 +84,9 @@ exports.getNovelsByUser = async (req, res) => {
 
 exports.updateNovel = async (req, res) => {
     try {
-        const { id } = req.params;
+        const { novelId } = req.params;
+
+
 
         // Check if req.body exists and is not null/undefined
         if (!req.body || typeof req.body !== 'object') {
@@ -93,10 +95,10 @@ exports.updateNovel = async (req, res) => {
 
         const { title, description, hookupDescription, language, status } = req.body;
 
-        const novel = await Novel.findById(id);
+        const novel = await Novel.findById(novelId);
 
         if (!novel) {
-            return res.status(404).json({ message: 'Novel not found' });
+            return res.status(404).json({ message: `Novel not found for ${novelId}` });
         }
         if (novel.author.toString() !== req.user.id) {
             return res.status(403).json({ message: 'Unauthorized' });
