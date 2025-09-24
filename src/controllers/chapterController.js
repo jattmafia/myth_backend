@@ -86,7 +86,7 @@ exports.getChapterById = async (req, res) => {
 exports.updateChapter = async (req, res) => {
     try {
         const { chapterId } = req.params;
-        const { console, title, authorMessage, chapterNumber, status } = req.body;
+        const { console, title, authorMessage, chapterNumber, status,content } = req.body;
         const coverImage = req.file;
         const chapter = await Chapter.findById(chapterId);
         if (!chapter) {
