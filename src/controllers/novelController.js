@@ -23,8 +23,10 @@ exports.createNovel = async (req, res) => {
             return res.status(404).json({ message: 'User not found' });
         }
 
-        if (!title || !description || !coverImage) {
-            return res.status(400).json({ message: 'Title, description, and cover image are required' });
+        console.log('Received data:', { title, description, hookupDescription, language, coverImage });
+
+        if (title === undefined || description === undefined || coverImage === undefined) {
+            return res.status(400).json({ message: 'title, description, and cover image are required' });
         }
 
         const uploadParams = {

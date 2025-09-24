@@ -8,7 +8,7 @@ const { verifyToken } = require('../middleware/authMiddleware');
 const upload = require('../middleware/uploadMiddleware');
 
 router.post('/createChapter', verifyToken, upload.single('coverImage'), chapter.createChapter);
-router.get('/getAllChapters', verifyToken, chapter.getChaptersByNovel);
+router.get('/getAllChapters/:novelId', verifyToken, chapter.getChaptersByNovel);
 router.get('/getChapter/:chapterId', verifyToken, chapter.getChapterById);
 router.put('/updateChapter/:chapterId', verifyToken, upload.single('coverImage'), chapter.updateChapter);
 

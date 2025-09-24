@@ -38,7 +38,16 @@ exports.createChapter = async (req, res) => {
             coverImage: uploadResult.Key,
             status: status || 'draft'
         });
-        await chapter.save();
+
+
+        const savedChapter = await chapter.save();
+        //adding chapter to novel's chapters array
+        const Novel = require('../models/novel');
+        const novel = await Novel.findById(novelId);
+        if (novel) {
+            novel.chapters.push(savedChapter._id);
+            await novel.save();
+        }
         res.status(201).json(chapter);
     } catch (error) {
         console.error('Error creating chapter:', error);
@@ -77,7 +86,7 @@ exports.getChapterById = async (req, res) => {
 exports.updateChapter = async (req, res) => {
     try {
         const { chapterId } = req.params;
-        const { console,title, authorMessage, chapterNumber, status } = req.body;
+        const { console, title, authorMessage, chapterNumber, status } = req.body;
         const coverImage = req.file;
         const chapter = await Chapter.findById(chapterId);
         if (!chapter) {

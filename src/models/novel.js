@@ -1,4 +1,5 @@
 const mongoose = require('mongoose');
+const chapter = require('./chapter');
 
 const NovelSchema = new mongoose.Schema({
   title: {
@@ -10,6 +11,10 @@ const NovelSchema = new mongoose.Schema({
     ref: 'User',
     required: true
   },
+  chapters: [{
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Chapter'
+  }],
   language: {
     type: String,
     required: true,
