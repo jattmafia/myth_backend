@@ -95,11 +95,11 @@ exports.updateNovel = async (req, res) => {
         if (novel.author.toString() !== req.user.id) {
             return res.status(403).json({ message: 'Unauthorized' });
         }
-        if (title) novel.title = title;
-        if (description) novel.description = description;
-        if (hookupDescription) novel.hookupDescription = hookupDescription;
-        if (language) novel.language = language;
-        if (status) novel.status = status;
+        if (title!= undefined ) novel.title = title;
+        if (description!= undefined ) novel.description = description;
+        if (hookupDescription!= undefined ) novel.hookupDescription = hookupDescription;
+        if (language!= undefined ) novel.language = language;
+        if (status!= undefined ) novel.status = status;
         await novel.save();
         res.status(200).json(novel);
     } catch (error) {
