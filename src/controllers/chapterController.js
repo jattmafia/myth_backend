@@ -118,3 +118,16 @@ exports.updateChapter = async (req, res) => {
         res.status(500).json({ error: error.message });
     }
 };
+
+
+//get published chapters by novel id
+exports.getPublishedChapters = async (req, res) => {
+    try {
+        const { novelId } = req.params;
+        const chapters = await Chapter.find({ novel: novelId, status: 'published' }).populate('author', 'username');
+        res.status(200).json(chapters);
+    } catch (error) {
+        console.error('Error fetching published chapters by novel:', error);
+        res.status(500).json({ error: error.message });
+    }
+};

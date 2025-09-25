@@ -11,5 +11,6 @@ router.post('/createChapter', verifyToken, upload.single('coverImage'), chapter.
 router.get('/getAllChapters/:novelId', verifyToken, chapter.getChaptersByNovel);
 router.get('/getChapter/:chapterId', verifyToken, chapter.getChapterById);
 router.put('/updateChapter/:chapterId', verifyToken, upload.single('coverImage'), chapter.updateChapter);
+router.get('/getPublishedChapters/:novelId', verifyToken,chapter.getPublishedChapters);
 
 module.exports = router;

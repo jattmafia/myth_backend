@@ -57,7 +57,7 @@ exports.createNovel = async (req, res) => {
     }
 };
 
-
+//fetch all novels which one is published
 exports.getNovels = async (req, res) => {
     try {
         const novels = await Novel.find().populate('author', 'username');

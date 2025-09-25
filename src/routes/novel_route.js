@@ -10,4 +10,5 @@ router.get('/getNovels', verifyToken, novel.getNovels);
 router.get('/getNovelsByUser', verifyToken, novel.getNovelsByUser);
 router.put('/updateNovel/:novelId', verifyToken, novel.updateNovel);
 
+
 module.exports = router;
