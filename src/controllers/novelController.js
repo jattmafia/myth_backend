@@ -123,7 +123,7 @@ exports.updateNovel = async (req, res) => {
 exports.getNovelById = async (req, res) => {
     try {
         const { novelId } = req.params;
-        const novel = await Novel.findById(novelId).populate('chapters',);
+        const novel = await Novel.findById(novelId).populate('chapters',).populate('author', 'username');
         if (!novel) {
             return res.status(404).json({ message: 'Novel not found' });
         }
