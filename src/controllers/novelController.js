@@ -118,3 +118,18 @@ exports.updateNovel = async (req, res) => {
         res.status(500).json({ error: error.message });
     }
 };
+
+//get novel by id and populate chapters title, number, cover image
+exports.getNovelById = async (req, res) => {
+    try {
+        const { novelId } = req.params;
+        const novel = await Novel.findById(novelId).populate('chapters',);
+        if (!novel) {
+            return res.status(404).json({ message: 'Novel not found' });
+        }
+        res.status(200).json(novel);
+    } catch (error) {
+        console.error('Error fetching novel by ID:', error);
+        res.status(500).json({ error: error.message });
+    }
+};

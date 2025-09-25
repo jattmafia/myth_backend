@@ -9,6 +9,7 @@ router.post('/createNovel', verifyToken, upload.single('coverImage'), novel.crea
 router.get('/getNovels', verifyToken, novel.getNovels);
 router.get('/getNovelsByUser', verifyToken, novel.getNovelsByUser);
 router.put('/updateNovel/:novelId', verifyToken, novel.updateNovel);
+router.get('/getNovelById/:novelId', verifyToken, novel.getNovelById);
 
 
 module.exports = router;
