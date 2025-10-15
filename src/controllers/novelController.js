@@ -123,10 +123,22 @@ exports.updateNovel = async (req, res) => {
 exports.getNovelById = async (req, res) => {
     try {
         const { novelId } = req.params;
-        const novel = await Novel.findById(novelId).populate('chapters',).populate('author', 'username');
+        // Populate author and chapters with their authors
+        const novel = await Novel.findById(novelId)
+            .populate('author', 'username profilePicture email')
+            .populate({
+                path: 'chapters',
+                populate: {
+                    path: 'author',
+                    select: 'username profilePicture'
+                }
+            });
+
         if (!novel) {
             return res.status(404).json({ message: 'Novel not found' });
         }
+
+        console.log('Novel data being sent:', novel);
         res.status(200).json(novel);
     } catch (error) {
         console.error('Error fetching novel by ID:', error);
