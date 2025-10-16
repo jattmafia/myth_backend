@@ -2,6 +2,7 @@
 const AWS = require('aws-sdk');
 const Novel = require('../models/novel'); // Import the Novel model
 const User = require('../models/user'); // Import the User model
+const ReadingProgress = require('../models/readingProgress'); // Import ReadingProgress model
 
 // Configure AWS SDK for Cloudflare R2
 const s3 = new AWS.S3({
@@ -119,10 +120,12 @@ exports.updateNovel = async (req, res) => {
     }
 };
 
-//get novel by id and populate chapters title, number, cover image
+//get novel by id and populate chapters title, number, cover image with reading progress
 exports.getNovelById = async (req, res) => {
     try {
         const { novelId } = req.params;
+        const userId = req.user?.id; // Optional - user might not be logged in
+
         // Populate author and chapters with their authors
         const novel = await Novel.findById(novelId)
             .populate('author', 'username profilePicture email')
@@ -138,8 +141,63 @@ exports.getNovelById = async (req, res) => {
             return res.status(404).json({ message: 'Novel not found' });
         }
 
-        console.log('Novel data being sent:', novel);
-        res.status(200).json(novel);
+        // If user is logged in, fetch their reading progress for all chapters
+        let progressMap = {};
+        if (userId && novel.chapters && novel.chapters.length > 0) {
+            const chapterIds = novel.chapters.map(ch => ch._id);
+
+            const progressList = await ReadingProgress.find({
+                user: userId,
+                chapter: { $in: chapterIds }
+            }).select('chapter scrollPosition progressPercent isCompleted lastReadAt');
+
+            // Create a map for easy lookup
+            progressList.forEach(progress => {
+                progressMap[progress.chapter.toString()] = {
+                    scrollPosition: progress.scrollPosition,
+                    progressPercent: progress.progressPercent,
+                    isCompleted: progress.isCompleted,
+                    lastReadAt: progress.lastReadAt
+                };
+            });
+        }
+
+        // Add progress data to each chapter
+        const chaptersWithProgress = novel.chapters.map(chapter => {
+            const chapterObj = chapter.toObject();
+            const chapterId = chapter._id.toString();
+
+            // Add reading progress if available
+            chapterObj.readingProgress = progressMap[chapterId] || {
+                scrollPosition: 0,
+                progressPercent: 0,
+                isCompleted: false,
+                lastReadAt: null
+            };
+
+            return chapterObj;
+        });
+
+        // Calculate overall novel progress
+        let overallProgress = 0;
+        let completedChapters = 0;
+
+        if (userId && chaptersWithProgress.length > 0) {
+            completedChapters = chaptersWithProgress.filter(ch => ch.readingProgress.isCompleted).length;
+            overallProgress = Math.round((completedChapters / chaptersWithProgress.length) * 100);
+        }
+
+        // Build response
+        const novelData = novel.toObject();
+        novelData.chapters = chaptersWithProgress;
+        novelData.userProgress = {
+            overallProgress,
+            completedChapters,
+            totalChapters: chaptersWithProgress.length
+        };
+
+        console.log('Novel data being sent with progress:', novelData);
+        res.status(200).json(novelData);
     } catch (error) {
         console.error('Error fetching novel by ID:', error);
         res.status(500).json({ error: error.message });
