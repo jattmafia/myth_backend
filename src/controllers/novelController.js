@@ -203,3 +203,150 @@ exports.getNovelById = async (req, res) => {
         res.status(500).json({ error: error.message });
     }
 };
+
+// Get user's currently reading novels (in progress, not finished)
+exports.getCurrentlyReading = async (req, res) => {
+    try {
+        const userId = req.user.id;
+
+        // Get all novels where user has reading progress
+        const progressRecords = await ReadingProgress.find({ user: userId })
+            .populate({
+                path: 'novel',
+                populate: {
+                    path: 'author',
+                    select: 'username profilePicture'
+                }
+            })
+            .sort({ lastReadAt: -1 });
+
+        // Group by novel and calculate progress
+        const novelsMap = new Map();
+
+        for (const progress of progressRecords) {
+            if (!progress.novel) continue;
+
+            const novelId = progress.novel._id.toString();
+
+            if (!novelsMap.has(novelId)) {
+                // Get total chapters for this novel
+                const totalChapters = progress.novel.chapters ? progress.novel.chapters.length : 0;
+
+                // Get all progress for this novel to calculate completion
+                const allNovelProgress = progressRecords.filter(
+                    p => p.novel && p.novel._id.toString() === novelId
+                );
+
+                const completedChapters = allNovelProgress.filter(p => p.isCompleted).length;
+                const overallProgress = totalChapters > 0
+                    ? Math.round((completedChapters / totalChapters) * 100)
+                    : 0;
+
+                // Only include if novel is not 100% complete
+                if (overallProgress < 100) {
+                    // Find the most recently read chapter
+                    const latestProgress = allNovelProgress.reduce((latest, current) => {
+                        return new Date(current.lastReadAt) > new Date(latest.lastReadAt)
+                            ? current
+                            : latest;
+                    });
+
+                    novelsMap.set(novelId, {
+                        novel: progress.novel,
+                        lastReadAt: latestProgress.lastReadAt,
+                        progressPercent: latestProgress.progressPercent,
+                        overallProgress,
+                        completedChapters,
+                        totalChapters
+                    });
+                }
+            }
+        }
+
+        // Convert map to array and sort by last read date
+        const currentlyReading = Array.from(novelsMap.values())
+            .sort((a, b) => new Date(b.lastReadAt) - new Date(a.lastReadAt));
+
+        res.status(200).json({
+            currentlyReading,
+            total: currentlyReading.length
+        });
+    } catch (error) {
+        console.error('Error fetching currently reading novels:', error);
+        res.status(500).json({ error: error.message });
+    }
+};
+
+// Get user's completed novels (100% finished)
+exports.getCompletedNovels = async (req, res) => {
+    try {
+        const userId = req.user.id;
+
+        // Get all novels where user has reading progress
+        const progressRecords = await ReadingProgress.find({ user: userId })
+            .populate({
+                path: 'novel',
+                populate: {
+                    path: 'author',
+                    select: 'username profilePicture'
+                }
+            })
+            .sort({ lastReadAt: -1 });
+
+        // Group by novel and check if completed
+        const novelsMap = new Map();
+
+        for (const progress of progressRecords) {
+            if (!progress.novel) continue;
+
+            const novelId = progress.novel._id.toString();
+
+            if (!novelsMap.has(novelId)) {
+                // Get total chapters for this novel
+                const totalChapters = progress.novel.chapters ? progress.novel.chapters.length : 0;
+
+                // Get all progress for this novel
+                const allNovelProgress = progressRecords.filter(
+                    p => p.novel && p.novel._id.toString() === novelId
+                );
+
+                const completedChapters = allNovelProgress.filter(p => p.isCompleted).length;
+                const overallProgress = totalChapters > 0
+                    ? Math.round((completedChapters / totalChapters) * 100)
+                    : 0;
+
+                // Only include if novel is 100% complete
+                if (overallProgress === 100) {
+                    // Find the last completed chapter
+                    const latestProgress = allNovelProgress
+                        .filter(p => p.isCompleted)
+                        .reduce((latest, current) => {
+                            return new Date(current.lastReadAt) > new Date(latest.lastReadAt)
+                                ? current
+                                : latest;
+                        });
+
+                    novelsMap.set(novelId, {
+                        novel: progress.novel,
+                        completedAt: latestProgress.lastReadAt,
+                        overallProgress,
+                        completedChapters,
+                        totalChapters
+                    });
+                }
+            }
+        }
+
+        // Convert map to array and sort by completion date
+        const completedNovels = Array.from(novelsMap.values())
+            .sort((a, b) => new Date(b.completedAt) - new Date(a.completedAt));
+
+        res.status(200).json({
+            completedNovels,
+            total: completedNovels.length
+        });
+    } catch (error) {
+        console.error('Error fetching completed novels:', error);
+        res.status(500).json({ error: error.message });
+    }
+};

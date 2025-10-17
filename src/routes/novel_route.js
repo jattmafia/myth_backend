@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const  novel = require('../controllers/novelController');
+const novel = require('../controllers/novelController');
 const { verifyToken } = require('../middleware/authMiddleware');
 
 const upload = require('../middleware/uploadMiddleware');
@@ -11,5 +11,8 @@ router.get('/getNovelsByUser', verifyToken, novel.getNovelsByUser);
 router.put('/updateNovel/:novelId', verifyToken, novel.updateNovel);
 router.get('/getNovelById/:novelId', verifyToken, novel.getNovelById);
 
+// Reading progress routes
+router.get('/currently-reading', verifyToken, novel.getCurrentlyReading);
+router.get('/completed', verifyToken, novel.getCompletedNovels);
 
 module.exports = router;
