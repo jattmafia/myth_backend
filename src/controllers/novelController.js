@@ -3,6 +3,9 @@ const AWS = require('aws-sdk');
 const Novel = require('../models/novel'); // Import the Novel model
 const User = require('../models/user'); // Import the User model
 const ReadingProgress = require('../models/readingProgress'); // Import ReadingProgress model
+const ChapterView = require('../models/chapterView'); // Import ChapterView model
+const Favorite = require('../models/favorite'); // Import Favorite model
+const Review = require('../models/review'); // Import Review model
 
 // Configure AWS SDK for Cloudflare R2
 const s3 = new AWS.S3({
@@ -61,8 +64,55 @@ exports.createNovel = async (req, res) => {
 //fetch all novels which one is published
 exports.getNovels = async (req, res) => {
     try {
+        const userId = req.user?.id;
         const novels = await Novel.find().populate('author', 'username');
-        res.status(200).json(novels);
+
+        // Initialize favoritesMap and reviewsMap
+        let favoritesMap = {};
+        let reviewsMap = {};
+
+        if (userId) {
+            // Get user favorites
+            const userFavorites = await Favorite.find({ user: userId }).select('novel');
+            userFavorites.forEach(fav => {
+                favoritesMap[fav.novel.toString()] = true;
+            });
+
+            // Get user's reviews for these novels
+            const novelIds = novels.map(n => n._id);
+            const userReviews = await Review.find({
+                user: userId,
+                novel: { $in: novelIds }
+            }).select('novel likes');
+
+            userReviews.forEach(review => {
+                reviewsMap[review.novel.toString()] = {
+                    likesCount: review.likes.length,
+                    isLikedByUser: review.likes.some(likeUserId => likeUserId.toString() === userId)
+                };
+            });
+        }
+
+        // Add favorite status and review info to each novel
+        const novelsWithExtras = novels.map(novel => {
+            const novelObj = novel.toObject();
+            novelObj.isFavorite = !!favoritesMap[novel._id.toString()];
+
+            // Add review info
+            const reviewInfo = reviewsMap[novel._id.toString()];
+            if (reviewInfo) {
+                novelObj.userReview = {
+                    likesCount: reviewInfo.likesCount,
+                    isLikedByUser: reviewInfo.isLikedByUser
+                };
+            } else {
+                novelObj.userReview = null;
+            }
+
+            return novelObj;
+        });
+
+        res.status(200).json(novelsWithExtras);
     } catch (error) {
         console.error('Error fetching novels:', error);
         res.status(500).json({ error: error.message });
@@ -74,6 +124,7 @@ exports.getNovels = async (req, res) => {
 exports.getNovelsByUser = async (req, res) => {
     try {
         const novels = await Novel.find({ author: req.user.id }).populate('author', 'username');
+
         res.status(200).json(novels);
     } catch (error) {
         console.error('Error fetching novels by user:', error);
@@ -187,6 +238,8 @@ exports.getNovelById = async (req, res) => {
             overallProgress = Math.round((completedChapters / chaptersWithProgress.length) * 100);
         }
 
+
+
         // Build response
         const novelData = novel.toObject();
         novelData.chapters = chaptersWithProgress;
@@ -196,7 +249,6 @@ exports.getNovelById = async (req, res) => {
             totalChapters: chaptersWithProgress.length
         };
 
-        console.log('Novel data being sent with progress:', novelData);
         res.status(200).json(novelData);
     } catch (error) {
         console.error('Error fetching novel by ID:', error);
@@ -348,5 +400,385 @@ exports.getCompletedNovels = async (req, res) => {
     } catch (error) {
         console.error('Error fetching completed novels:', error);
         res.status(500).json({ error: error.message });
+    }
+};
+
+// Record a chapter view (24-hour cooldown per user per chapter)
+exports.recordChapterView = async (req, res) => {
+    try {
+        const { chapterId } = req.params;
+        const userId = req.user.id;
+
+        // Get chapter details to find novel ID
+        const Chapter = require('../models/chapter');
+        const chapter = await Chapter.findById(chapterId);
+
+        if (!chapter) {
+            return res.status(404).json({
+                success: false,
+                message: 'Chapter not found'
+            });
+        }
+
+        // Record the view
+        const result = await ChapterView.recordChapterView(
+            userId,
+            chapterId,
+            chapter.novel
+        );
+
+        if (result.success) {
+            // Get updated counts
+            const chapterViewCount = await ChapterView.getChapterViewCount(chapterId);
+            const novelViewCount = await ChapterView.getNovelViewCount(chapter.novel);
+
+            return res.status(201).json({
+                success: true,
+                message: 'Chapter view recorded successfully',
+                data: {
+                    chapterId,
+                    novelId: chapter.novel,
+                    chapterViewCount,
+                    novelViewCount,
+                    viewedAt: result.view.viewedAt
+                }
+            });
+        } else {
+            return res.status(200).json({
+                success: false,
+                message: result.message,
+                alreadyViewed: result.alreadyViewed,
+                data: {
+                    chapterId,
+                    novelId: chapter.novel
+                }
+            });
+        }
+
+    } catch (error) {
+        console.error('Error recording chapter view:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Internal server error',
+            error: error.message
+        });
+    }
+};
+
+// Get chapter view statistics
+exports.getChapterViewStats = async (req, res) => {
+    try {
+        const { chapterId } = req.params;
+        const { timeframe } = req.query; // Optional: 24h, 7d, 30d
+
+        let timeframeMs = null;
+        if (timeframe) {
+            switch (timeframe) {
+                case '24h':
+                    timeframeMs = 24 * 60 * 60 * 1000;
+                    break;
+                case '7d':
+                    timeframeMs = 7 * 24 * 60 * 60 * 1000;
+                    break;
+                case '30d':
+                    timeframeMs = 30 * 24 * 60 * 60 * 1000;
+                    break;
+            }
+        }
+
+        const viewCount = await ChapterView.getChapterViewCount(chapterId, timeframeMs);
+
+        res.status(200).json({
+            success: true,
+            data: {
+                chapterId,
+                viewCount,
+                timeframe: timeframe || 'all-time'
+            }
+        });
+
+    } catch (error) {
+        console.error('Error fetching chapter view stats:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Internal server error',
+            error: error.message
+        });
+    }
+};
+
+// Get novel view statistics (sum of all chapter views)
+exports.getNovelViewStats = async (req, res) => {
+    try {
+        const { novelId } = req.params;
+        const { timeframe } = req.query; // Optional: 24h, 7d, 30d
+
+        let timeframeMs = null;
+        if (timeframe) {
+            switch (timeframe) {
+                case '24h':
+                    timeframeMs = 24 * 60 * 60 * 1000;
+                    break;
+                case '7d':
+                    timeframeMs = 7 * 24 * 60 * 60 * 1000;
+                    break;
+                case '30d':
+                    timeframeMs = 30 * 24 * 60 * 60 * 1000;
+                    break;
+            }
+        }
+
+        const totalViews = await ChapterView.getNovelViewCount(novelId, timeframeMs);
+
+        // Get per-chapter breakdown
+        const Chapter = require('../models/chapter');
+        const chapters = await Chapter.find({ novel: novelId }).select('_id title chapterNumber viewCount');
+
+        const chapterStats = [];
+        for (const chapter of chapters) {
+            const chapterViews = await ChapterView.getChapterViewCount(chapter._id, timeframeMs);
+            chapterStats.push({
+                chapterId: chapter._id,
+                title: chapter.title,
+                chapterNumber: chapter.chapterNumber,
+                viewCount: chapterViews,
+                totalViewCount: chapter.viewCount
+            });
+        }
+
+        res.status(200).json({
+            success: true,
+            data: {
+                novelId,
+                totalViews,
+                timeframe: timeframe || 'all-time',
+                chapters: chapterStats
+            }
+        });
+
+    } catch (error) {
+        console.error('Error fetching novel view stats:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Internal server error',
+            error: error.message
+        });
+    }
+};
+
+// Get user's recently viewed chapters
+exports.getUserRecentlyViewed = async (req, res) => {
+    try {
+        const userId = req.user.id;
+        const { limit = 10 } = req.query;
+
+        const recentlyViewed = await ChapterView.getUserRecentlyViewedChapters(
+            userId,
+            parseInt(limit)
+        );
+
+        res.status(200).json({
+            success: true,
+            data: {
+                recentlyViewed,
+                total: recentlyViewed.length
+            }
+        });
+
+    } catch (error) {
+        console.error('Error fetching recently viewed chapters:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Internal server error',
+            error: error.message
+        });
+    }
+};
+
+// Toggle novel favorite (like/unlike)
+exports.toggleNovelFavorite = async (req, res) => {
+    try {
+        const { novelId } = req.params;
+        const userId = req.user.id;
+
+        // Check if novel exists
+        const novel = await Novel.findById(novelId);
+        if (!novel) {
+            return res.status(404).json({
+                success: false,
+                message: 'Novel not found'
+            });
+        }
+
+        // Toggle favorite
+        const result = await Favorite.toggleFavorite(userId, novelId);
+
+        if (result.success) {
+            // Get updated like count
+            const totalLikes = await Favorite.getNovelLikesCount(novelId);
+
+            return res.status(200).json({
+                success: true,
+                message: result.message,
+                data: {
+                    novelId,
+                    action: result.action,
+                    isFavorited: result.isFavorited,
+                    totalLikes
+                }
+            });
+        } else {
+            return res.status(400).json({
+                success: false,
+                message: result.message,
+                data: {
+                    novelId,
+                    isFavorited: result.isFavorited
+                }
+            });
+        }
+
+    } catch (error) {
+        console.error('Error toggling novel favorite:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Internal server error',
+            error: error.message
+        });
+    }
+};
+
+// Get user's favorite novels
+exports.getUserFavorites = async (req, res) => {
+    try {
+        const userId = req.user.id;
+        const { limit = 20 } = req.query;
+
+        const favorites = await Favorite.getUserFavorites(userId, parseInt(limit));
+
+        res.status(200).json({
+            success: true,
+            data: {
+                favorites: favorites.map(fav => ({
+                    _id: fav._id,
+                    novel: fav.novel,
+                    favoriteAt: fav.createdAt
+                })),
+                total: favorites.length
+            }
+        });
+
+    } catch (error) {
+        console.error('Error fetching user favorites:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Internal server error',
+            error: error.message
+        });
+    }
+};
+
+// Get novel like statistics
+exports.getNovelLikeStats = async (req, res) => {
+    try {
+        const { novelId } = req.params;
+
+        // Check if novel exists
+        const novel = await Novel.findById(novelId).select('title totalLikes');
+        if (!novel) {
+            return res.status(404).json({
+                success: false,
+                message: 'Novel not found'
+            });
+        }
+
+        const totalLikes = await Favorite.getNovelLikesCount(novelId);
+
+        res.status(200).json({
+            success: true,
+            data: {
+                novelId,
+                title: novel.title,
+                totalLikes,
+                storedLikes: novel.totalLikes
+            }
+        });
+
+    } catch (error) {
+        console.error('Error fetching novel like stats:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Internal server error',
+            error: error.message
+        });
+    }
+};
+
+// Check if user has favorited a novel
+exports.checkNovelFavoriteStatus = async (req, res) => {
+    try {
+        const { novelId } = req.params;
+        const userId = req.user.id;
+
+        const isFavorited = await Favorite.isFavorited(userId, novelId);
+        const totalLikes = await Favorite.getNovelLikesCount(novelId);
+
+        res.status(200).json({
+            success: true,
+            data: {
+                novelId,
+                isFavorited,
+                totalLikes
+            }
+        });
+
+    } catch (error) {
+        console.error('Error checking favorite status:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Internal server error',
+            error: error.message
+        });
+    }
+};
+
+// Get most liked novels
+exports.getMostLikedNovels = async (req, res) => {
+    try {
+        const { limit = 10, timeframe } = req.query;
+
+        let timeframeMs = null;
+        if (timeframe) {
+            switch (timeframe) {
+                case '24h':
+                    timeframeMs = 24 * 60 * 60 * 1000;
+                    break;
+                case '7d':
+                    timeframeMs = 7 * 24 * 60 * 60 * 1000;
+                    break;
+                case '30d':
+                    timeframeMs = 30 * 24 * 60 * 60 * 1000;
+                    break;
+            }
+        }
+
+        const mostLiked = await Favorite.getMostLikedNovels(parseInt(limit), timeframeMs);
+
+        res.status(200).json({
+            success: true,
+            data: {
+                novels: mostLiked,
+                total: mostLiked.length,
+                timeframe: timeframe || 'all-time'
+            }
+        });
+
+    } catch (error) {
+        console.error('Error fetching most liked novels:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Internal server error',
+            error: error.message
+        });
     }
 };

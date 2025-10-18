@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const chapter = require('../controllers/chapterController');
+const novel = require('../controllers/novelController');
 const { verifyToken } = require('../middleware/authMiddleware');
 
 
@@ -18,5 +19,11 @@ router.put('/chapter-progress/:chapterId', verifyToken, chapter.updateReadingPro
 router.get('/chapter-progress/:chapterId', verifyToken, chapter.getChapterProgress);
 router.get('/novel-progress/:novelId', verifyToken, chapter.getNovelProgress);
 router.get('/currently-reading', verifyToken, chapter.getCurrentlyReading);
+
+// View tracking routes
+router.post('/view/:chapterId', verifyToken, novel.recordChapterView);
+router.get('/view/stats/:chapterId', verifyToken, novel.getChapterViewStats);
+router.get('/view/novel-stats/:novelId', verifyToken, novel.getNovelViewStats);
+router.get('/view/recently-viewed', verifyToken, novel.getUserRecentlyViewed);
 
 module.exports = router;

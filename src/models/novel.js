@@ -36,6 +36,24 @@ const NovelSchema = new mongoose.Schema({
     enum: ['draft', 'published'],
     default: 'draft'
   },
+  totalViews: {
+    type: Number,
+    default: 0
+  },
+  totalLikes: {
+    type: Number,
+    default: 0
+  },
+  averageRating: {
+    type: Number,
+    default: 0,
+    min: 0,
+    max: 5
+  },
+  totalReviews: {
+    type: Number,
+    default: 0
+  },
   createdAt: {
     type: Date,
     default: Date.now

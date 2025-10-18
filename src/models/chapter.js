@@ -13,7 +13,7 @@ const ChapterSchema = new mongoose.Schema({
     type: String,
     required: false
   },
-  authorMessage:{
+  authorMessage: {
     type: String,
     required: false
   },
@@ -35,6 +35,10 @@ const ChapterSchema = new mongoose.Schema({
     type: String,
     enum: ['draft', 'published'],
     default: 'draft'
+  },
+  viewCount: {
+    type: Number,
+    default: 0
   },
   createdAt: {
     type: Date,

@@ -1,6 +1,7 @@
 
 const Chapter = require('../models/chapter');
 const ReadingProgress = require('../models/readingProgress');
+const ChapterView = require('../models/chapterView');
 const AWS = require('aws-sdk');
 
 // Configure AWS SDK for Cloudflare R2
