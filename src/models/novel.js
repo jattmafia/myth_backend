@@ -33,7 +33,7 @@ const NovelSchema = new mongoose.Schema({
   },
   status: {
     type: String,
-    enum: ['draft', 'published'],
+    enum: ['draft', 'published','ongoing'],
     default: 'draft'
   },
   totalViews: {

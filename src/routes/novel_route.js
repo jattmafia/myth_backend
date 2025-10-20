@@ -10,6 +10,7 @@ router.get('/getNovels', verifyToken, novel.getNovels);
 router.get('/getNovelsByUser', verifyToken, novel.getNovelsByUser);
 router.put('/updateNovel/:novelId', verifyToken, novel.updateNovel);
 router.get('/getNovelById/:novelId', verifyToken, novel.getNovelById);
+router.get('/discover', verifyToken, novel.getDiscoverNovels);
 
 // Reading progress routes
 router.get('/currently-reading', verifyToken, novel.getCurrentlyReading);

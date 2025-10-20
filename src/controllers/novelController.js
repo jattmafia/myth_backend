@@ -65,7 +65,13 @@ exports.createNovel = async (req, res) => {
 exports.getNovels = async (req, res) => {
     try {
         const userId = req.user?.id;
-        const novels = await Novel.find().populate('author', 'username');
+        const novels = await Novel.find({ status: { $in: ['published', 'ongoing'] } })
+            .populate('author', 'username')
+            .populate({
+                path: 'chapters',
+                match: { status: 'published' },
+                select: 'title chapterNumber createdAt'
+            });
 
         // Initialize favoritesMap and reviewsMap
         let favoritesMap = {};
@@ -96,7 +102,7 @@ exports.getNovels = async (req, res) => {
         // Add favorite status and review info to each novel
         const novelsWithExtras = novels.map(novel => {
             const novelObj = novel.toObject();
-            novelObj.isFavorite = !!favoritesMap[novel._id.toString()];
+            novelObj.isFavourite = !!favoritesMap[novel._id.toString()];
 
             // Add review info
             const reviewInfo = reviewsMap[novel._id.toString()];
@@ -129,6 +135,163 @@ exports.getNovelsByUser = async (req, res) => {
     } catch (error) {
         console.error('Error fetching novels by user:', error);
         res.status(500).json({ error: error.message });
+    }
+};
+
+// Get discover novels (latest releases, most popular, recommended)
+exports.getDiscoverNovels = async (req, res) => {
+    try {
+        const userId = req.user?.id;
+        const limit = parseInt(req.query.limit) || 10;
+
+        // Get latest releases (recently created novels) - only published/ongoing
+        const latestReleases = await Novel.find({ status: { $in: ['published', 'ongoing'] } })
+            .populate('author', 'username profilePicture')
+            .populate({
+                path: 'chapters',
+                match: { status: 'published' },
+                select: 'title chapterNumber createdAt'
+            })
+            .sort({ createdAt: -1 })
+            .limit(limit);
+
+        // Get most popular novels (based on favorites count) - only published/ongoing
+        const mostPopular = await Novel.aggregate([
+            {
+                $match: { status: { $in: ['published', 'ongoing'] } }
+            },
+            {
+                $lookup: {
+                    from: 'favorites',
+                    localField: '_id',
+                    foreignField: 'novel',
+                    as: 'favorites'
+                }
+            },
+            {
+                $addFields: {
+                    favoritesCount: { $size: '$favorites' }
+                }
+            },
+            {
+                $sort: { favoritesCount: -1 }
+            },
+            {
+                $limit: limit
+            },
+            {
+                $lookup: {
+                    from: 'users',
+                    localField: 'author',
+                    foreignField: '_id',
+                    as: 'author',
+                    pipeline: [
+                        { $project: { username: 1, profilePicture: 1 } }
+                    ]
+                }
+            },
+            {
+                $unwind: '$author'
+            },
+            {
+                $lookup: {
+                    from: 'chapters',
+                    localField: '_id',
+                    foreignField: 'novel',
+                    as: 'chapters',
+                    pipeline: [
+                        { $match: { status: 'published' } },
+                        { $project: { title: 1, chapterNumber: 1, createdAt: 1 } }
+                    ]
+                }
+            }
+        ]);
+
+        // Get recommended novels (highest rated novels) - only published/ongoing
+        const recommended = await Novel.find({
+            averageRating: { $gte: 4.0 },
+            status: { $in: ['published', 'ongoing'] }
+        })
+            .populate('author', 'username profilePicture')
+            .populate({
+                path: 'chapters',
+                match: { status: 'published' },
+                select: 'title chapterNumber createdAt'
+            })
+            .sort({ averageRating: -1, totalReviews: -1 })
+            .limit(limit);
+
+        // If user is logged in, add favorite status and user review info
+        let favoritesMap = {};
+        let reviewsMap = {};
+
+        if (userId) {
+            // Get user favorites for all novels
+            const allNovelIds = [
+                ...latestReleases.map(n => n._id),
+                ...mostPopular.map(n => n._id),
+                ...recommended.map(n => n._id)
+            ];
+
+            const userFavorites = await Favorite.find({
+                user: userId,
+                novel: { $in: allNovelIds }
+            }).select('novel');
+
+            userFavorites.forEach(fav => {
+                favoritesMap[fav.novel.toString()] = true;
+            });
+
+            // Get user's reviews for these novels
+            const userReviews = await Review.find({
+                user: userId,
+                novel: { $in: allNovelIds }
+            }).select('novel likes');
+
+            userReviews.forEach(review => {
+                reviewsMap[review.novel.toString()] = {
+                    likesCount: review.likes.length,
+                    isLikedByUser: review.likes.some(likeUserId => likeUserId.toString() === userId)
+                };
+            });
+        }
+
+        // Transform novels to add extra info
+        const transformNovels = (novels) => {
+            return novels.map(novel => {
+                const novelObj = novel.toObject ? novel.toObject() : novel;
+                novelObj.isFavourite = !!favoritesMap[novelObj._id.toString()];
+
+                const reviewInfo = reviewsMap[novelObj._id.toString()];
+                if (reviewInfo) {
+                    novelObj.userReview = {
+                        likesCount: reviewInfo.likesCount,
+                        isLikedByUser: reviewInfo.isLikedByUser
+                    };
+                } else {
+                    novelObj.userReview = null;
+                }
+
+                return novelObj;
+            });
+        };
+
+        res.status(200).json({
+            success: true,
+            data: {
+                latestReleases: transformNovels(latestReleases),
+                mostPopular: transformNovels(mostPopular),
+                recommended: transformNovels(recommended)
+            }
+        });
+
+    } catch (error) {
+        console.error('Error fetching discover novels:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Internal server error',
+            error: error.message
+        });
     }
 };
 
@@ -177,11 +340,12 @@ exports.getNovelById = async (req, res) => {
         const { novelId } = req.params;
         const userId = req.user?.id; // Optional - user might not be logged in
 
-        // Populate author and chapters with their authors
+        // Populate author and chapters with their authors (only published chapters)
         const novel = await Novel.findById(novelId)
             .populate('author', 'username profilePicture email')
             .populate({
                 path: 'chapters',
+                match: { status: 'published' },
                 populate: {
                     path: 'author',
                     select: 'username profilePicture'

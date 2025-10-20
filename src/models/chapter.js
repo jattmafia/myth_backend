@@ -33,7 +33,7 @@ const ChapterSchema = new mongoose.Schema({
   },
   status: {
     type: String,
-    enum: ['draft', 'published'],
+    enum: ['draft', 'published',],
     default: 'draft'
   },
   viewCount: {
