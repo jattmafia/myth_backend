@@ -95,7 +95,9 @@ exports.getUserProfile = async (req, res) => {
       });
     }
 
-   
+    // Transform user object to include full URL for profile picture
+    const userObj = user.toObject();
+  
 
     res.status(200).json({
       success: true,
