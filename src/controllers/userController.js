@@ -47,20 +47,7 @@ exports.createProfile = async (req, res) => {
 
       const uploadResult = await s3.upload(uploadParams).promise();
 
-      // Delete old profile picture if exists
-      if (user.profilePicture) {
-        try {
-          const deleteParams = {
-            Bucket: process.env.CLOUDFLARE_R2_BUCKET_NAME,
-            Key: user.profilePicture,
-          };
-          await s3.deleteObject(deleteParams).promise();
-          console.log('Old profile picture deleted:', user.profilePicture);
-        } catch (deleteError) {
-          console.error('Error deleting old profile picture:', deleteError);
-          // Continue with upload even if delete fails
-        }
-      }
+    
 
       console.log('File uploaded successfully:', uploadResult);
 
@@ -208,6 +195,21 @@ exports.updateUserProfile = async (req, res) => {
       };
 
       const uploadResult = await s3.upload(uploadParams).promise();
+      console.log('File uploaded successfully:', uploadResult);
+        // Delete old profile picture if exists
+      if (user.profilePicture) {
+        try {
+          const deleteParams = {
+            Bucket: process.env.CLOUDFLARE_R2_BUCKET_NAME,
+            Key: user.profilePicture,
+          };
+          await s3.deleteObject(deleteParams).promise();
+          console.log('Old profile picture deleted:', user.profilePicture);
+        } catch (deleteError) {
+          console.error('Error deleting old profile picture:', deleteError);
+          // Continue with upload even if delete fails
+        }
+      }
       user.profilePicture = uploadResult.Key;
     }
 
