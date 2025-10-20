@@ -95,11 +95,7 @@ exports.getUserProfile = async (req, res) => {
       });
     }
 
-    // Transform user object to include full URL for profile picture
-    const userObj = user.toObject();
-    if (userObj.profilePicture) {
-      userObj.profilePicture = `${process.env.CLOUDFLARE_R2_ENDPOINT}/${process.env.CLOUDFLARE_R2_BUCKET_NAME}/${userObj.profilePicture}`;
-    }
+   
 
     res.status(200).json({
       success: true,
