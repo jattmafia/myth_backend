@@ -34,7 +34,9 @@ exports.createProfile = async (req, res) => {
 
     if (profilePicture) {
 
-      // Upload the profile picture to Cloudflare R2
+
+
+      // Upload the new profile picture to Cloudflare R2
       const uploadParams = {
         Bucket: process.env.CLOUDFLARE_R2_BUCKET_NAME, // Your R2 bucket name
         Key: `profile-pictures/${Date.now()}-${profilePicture.originalname}`, // Unique file name
@@ -44,6 +46,21 @@ exports.createProfile = async (req, res) => {
       };
 
       const uploadResult = await s3.upload(uploadParams).promise();
+
+      // Delete old profile picture if exists
+      if (user.profilePicture) {
+        try {
+          const deleteParams = {
+            Bucket: process.env.CLOUDFLARE_R2_BUCKET_NAME,
+            Key: user.profilePicture,
+          };
+          await s3.deleteObject(deleteParams).promise();
+          console.log('Old profile picture deleted:', user.profilePicture);
+        } catch (deleteError) {
+          console.error('Error deleting old profile picture:', deleteError);
+          // Continue with upload even if delete fails
+        }
+      }
 
       console.log('File uploaded successfully:', uploadResult);
 
@@ -208,10 +225,7 @@ exports.updateUserProfile = async (req, res) => {
     // Return updated user without password
     const updatedUser = await User.findById(userId).select('-password');
 
-    // Transform profilePicture key to full URL
-    if (updatedUser.profilePicture) {
-      updatedUser.profilePicture = `${process.env.CLOUDFLARE_R2_ENDPOINT}/${process.env.CLOUDFLARE_R2_BUCKET_NAME}/${updatedUser.profilePicture}`;
-    }
+
 
     res.status(200).json({
       success: true,
