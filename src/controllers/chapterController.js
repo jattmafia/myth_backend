@@ -193,6 +193,7 @@ exports.updateReadingProgress = async (req, res) => {
         const isCompleted = progressPercent >= 95;
 
         // Update or create reading progress
+        // If record was soft-deleted, restore it by setting isDeleted to false
         const progress = await ReadingProgress.findOneAndUpdate(
             { user: req.user.id, chapter: chapterId },
             {
@@ -201,6 +202,7 @@ exports.updateReadingProgress = async (req, res) => {
                 progressPercent: progressPercent,
                 totalContentHeight: totalContentHeight || 0,
                 isCompleted,
+                isDeleted: false,  // Restore if was deleted
                 lastReadAt: new Date(),
                 updatedAt: new Date()
             },

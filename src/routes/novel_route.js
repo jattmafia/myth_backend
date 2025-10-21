@@ -15,6 +15,9 @@ router.get('/discover', verifyToken, novel.getDiscoverNovels);
 // Reading progress routes
 router.get('/currently-reading', verifyToken, novel.getCurrentlyReading);
 router.get('/completed', verifyToken, novel.getCompletedNovels);
+router.get('/reading-history', verifyToken, novel.getReadingHistory);
+router.delete('/reading-history/:novelId', verifyToken, novel.deleteReadingHistory);
+router.delete('/reading-history', verifyToken, novel.deleteAllReadingHistory);
 
 // View tracking routes
 router.post('/view/chapter/:chapterId', verifyToken, novel.recordChapterView);
@@ -32,5 +35,12 @@ router.get('/favourite/status/:novelId', verifyToken, novel.checkNovelFavoriteSt
 router.get('/favorite/stats/:novelId', verifyToken, novel.getNovelLikeStats);
 router.get('/favourite/stats/:novelId', verifyToken, novel.getNovelLikeStats); // British spelling
 router.get('/most-liked', verifyToken, novel.getMostLikedNovels);
+
+// Bookshelf routes
+router.post('/bookshelf/:novelId', verifyToken, novel.addToBookshelf);
+router.delete('/bookshelf/:novelId', verifyToken, novel.removeFromBookshelf);
+router.get('/bookshelf', verifyToken, novel.getUserBookshelf);
+router.put('/bookshelf/:novelId', verifyToken, novel.updateBookshelfEntry);
+router.get('/bookshelf/status/:novelId', verifyToken, novel.checkBookshelfStatus);
 
 module.exports = router;

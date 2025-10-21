@@ -43,6 +43,11 @@ const ReadingProgressSchema = new mongoose.Schema({
         type: Boolean,
         default: false
     },
+    // Soft delete flag for reading history deletion
+    isDeleted: {
+        type: Boolean,
+        default: false
+    },
     createdAt: {
         type: Date,
         default: Date.now

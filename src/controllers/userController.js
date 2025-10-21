@@ -47,7 +47,7 @@ exports.createProfile = async (req, res) => {
 
       const uploadResult = await s3.upload(uploadParams).promise();
 
-    
+
 
       console.log('File uploaded successfully:', uploadResult);
 
@@ -97,7 +97,7 @@ exports.getUserProfile = async (req, res) => {
 
     // Transform user object to include full URL for profile picture
     const userObj = user.toObject();
-  
+
 
     res.status(200).json({
       success: true,
@@ -194,7 +194,7 @@ exports.updateUserProfile = async (req, res) => {
 
       const uploadResult = await s3.upload(uploadParams).promise();
       console.log('File uploaded successfully:', uploadResult);
-        // Delete old profile picture if exists
+      // Delete old profile picture if exists
       if (user.profilePicture) {
         try {
           const deleteParams = {
@@ -279,6 +279,14 @@ exports.changePassword = async (req, res) => {
       });
     }
 
+    // Check if user signed up with Google/OAuth (no password set)
+    if (!user.password || user.loginType === 'google') {
+      return res.status(400).json({
+        success: false,
+        message: 'Cannot change password for accounts created with Google Sign-In. Please use Google to manage your account.'
+      });
+    }
+
     // Verify current password
     const isCurrentPasswordValid = await bcrypt.compare(currentPassword, user.password);
     if (!isCurrentPasswordValid) {
@@ -288,12 +296,8 @@ exports.changePassword = async (req, res) => {
       });
     }
 
-    // Hash new password
-    const saltRounds = 10;
-    const hashedNewPassword = await bcrypt.hash(newPassword, saltRounds);
-
-    // Update password
-    user.password = hashedNewPassword;
+    // Update password (let pre-save hook handle hashing)
+    user.password = newPassword;
     await user.save();
 
     res.status(200).json({

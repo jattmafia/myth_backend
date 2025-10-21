@@ -402,16 +402,44 @@ exports.getNovelById = async (req, res) => {
             overallProgress = Math.round((completedChapters / chaptersWithProgress.length) * 100);
         }
 
+        // Get chapter statistics (including all chapters, not just published)
+        const Chapter = require('../models/chapter');
+        const allChapters = await Chapter.find({ novel: novelId });
 
+        const chapterStats = {
+            totalChapters: allChapters.length,
+            publishedChapters: allChapters.filter(ch => ch.status === 'published').length,
+            draftChapters: allChapters.filter(ch => ch.status === 'draft').length,
+            totalViews: allChapters.reduce((sum, ch) => sum + (ch.viewCount || 0), 0),
+            latestChapter: allChapters.length > 0 ? {
+                title: allChapters[allChapters.length - 1].title,
+                chapterNumber: allChapters[allChapters.length - 1].chapterNumber,
+                createdAt: allChapters[allChapters.length - 1].createdAt,
+                status: allChapters[allChapters.length - 1].status
+            } : null
+        };
 
         // Build response
         const novelData = novel.toObject();
         novelData.chapters = chaptersWithProgress;
+        novelData.chapterStats = chapterStats;
         novelData.userProgress = {
             overallProgress,
             completedChapters,
             totalChapters: chaptersWithProgress.length
         };
+
+        // Check if novel is in user's bookshelf
+        if (userId) {
+            const Bookshelf = require('../models/bookshelf');
+            const bookshelfEntry = await Bookshelf.findOne({
+                user: userId,
+                novel: novelId
+            });
+            novelData.isBookshelf = !!bookshelfEntry;
+        } else {
+            novelData.isBookshelf = false;
+        }
 
         res.status(200).json(novelData);
     } catch (error) {
@@ -426,7 +454,9 @@ exports.getCurrentlyReading = async (req, res) => {
         const userId = req.user.id;
 
         // Get all novels where user has reading progress
-        const progressRecords = await ReadingProgress.find({ user: userId })
+        const progressRecords = await ReadingProgress.find({
+            user: userId
+        })
             .populate({
                 path: 'novel',
                 populate: {
@@ -499,7 +529,9 @@ exports.getCompletedNovels = async (req, res) => {
         const userId = req.user.id;
 
         // Get all novels where user has reading progress
-        const progressRecords = await ReadingProgress.find({ user: userId })
+        const progressRecords = await ReadingProgress.find({
+            user: userId
+        })
             .populate({
                 path: 'novel',
                 populate: {
@@ -511,6 +543,7 @@ exports.getCompletedNovels = async (req, res) => {
 
         // Group by novel and check if completed
         const novelsMap = new Map();
+        const Chapter = require('../models/chapter');
 
         for (const progress of progressRecords) {
             if (!progress.novel) continue;
@@ -518,8 +551,11 @@ exports.getCompletedNovels = async (req, res) => {
             const novelId = progress.novel._id.toString();
 
             if (!novelsMap.has(novelId)) {
-                // Get total chapters for this novel
-                const totalChapters = progress.novel.chapters ? progress.novel.chapters.length : 0;
+                // Get total PUBLISHED chapters for this novel (not drafts)
+                const totalChapters = await Chapter.countDocuments({
+                    novel: novelId,
+                    status: 'published'
+                });
 
                 // Get all progress for this novel
                 const allNovelProgress = progressRecords.filter(
@@ -554,8 +590,33 @@ exports.getCompletedNovels = async (req, res) => {
         }
 
         // Convert map to array and sort by completion date
-        const completedNovels = Array.from(novelsMap.values())
+        let completedNovels = Array.from(novelsMap.values())
             .sort((a, b) => new Date(b.completedAt) - new Date(a.completedAt));
+
+        // Get user's favorites to add isFavourite flag
+        const Favorite = require('../models/favorite');
+        const novelIds = completedNovels.map(item => item.novel._id);
+        const favorites = await Favorite.find({
+            user: userId,
+            novel: { $in: novelIds }
+        }).select('novel');
+
+        // Create a map of favorite novel IDs
+        const favoritesMap = {};
+        favorites.forEach(fav => {
+            favoritesMap[fav.novel.toString()] = true;
+        });
+
+        // Add isFavourite flag to each novel
+        completedNovels = completedNovels.map(item => {
+            const novelObj = item.novel.toObject ? item.novel.toObject() : item.novel;
+            novelObj.isFavourite = !!favoritesMap[item.novel._id.toString()];
+
+            return {
+                ...item,
+                novel: novelObj
+            };
+        });
 
         res.status(200).json({
             completedNovels,
@@ -564,6 +625,219 @@ exports.getCompletedNovels = async (req, res) => {
     } catch (error) {
         console.error('Error fetching completed novels:', error);
         res.status(500).json({ error: error.message });
+    }
+};
+
+// Get all reading history (all novels user has read, both completed and in progress)
+exports.getReadingHistory = async (req, res) => {
+    try {
+        const userId = req.user.id;
+        console.log('🔍 getReadingHistory - userId:', userId);
+
+        // Get all novels where user has reading progress (only non-deleted)
+        // Include records where isDeleted is false OR doesn't exist (for backward compatibility)
+        const progressRecords = await ReadingProgress.find({
+            user: userId,
+            $or: [
+                { isDeleted: false },
+                { isDeleted: { $exists: false } }
+            ]
+        })
+            .populate({
+                path: 'novel',
+                populate: {
+                    path: 'author',
+                    select: 'username profilePicture'
+                }
+            })
+            .sort({ lastReadAt: -1 });
+
+        console.log('📚 progressRecords found:', progressRecords.length);
+        console.log('📋 progressRecords details:', progressRecords.map(p => ({
+            novelId: p.novel?._id,
+            isDeleted: p.isDeleted,
+            lastReadAt: p.lastReadAt
+        })));
+
+        // Group by novel and calculate progress
+        const novelsMap = new Map();
+        const Chapter = require('../models/chapter');
+
+        for (const progress of progressRecords) {
+            if (!progress.novel) continue;
+
+            const novelId = progress.novel._id.toString();
+
+            if (!novelsMap.has(novelId)) {
+                // Get total PUBLISHED chapters for this novel (not drafts)
+                const totalChapters = await Chapter.countDocuments({
+                    novel: novelId,
+                    status: 'published'
+                });
+
+                // Get all progress for this novel
+                const allNovelProgress = progressRecords.filter(
+                    p => p.novel && p.novel._id.toString() === novelId
+                );
+
+                const completedChapters = allNovelProgress.filter(p => p.isCompleted).length;
+                const overallProgress = totalChapters > 0
+                    ? Math.round((completedChapters / totalChapters) * 100)
+                    : 0;
+
+                // Find the most recently read chapter
+                const latestProgress = allNovelProgress.reduce((latest, current) => {
+                    return new Date(current.lastReadAt) > new Date(latest.lastReadAt)
+                        ? current
+                        : latest;
+                });
+
+                novelsMap.set(novelId, {
+                    novel: progress.novel,
+                    lastReadAt: latestProgress.lastReadAt,
+                    progressPercent: latestProgress.progressPercent,
+                    overallProgress,
+                    completedChapters,
+                    totalChapters,
+                    status: overallProgress === 100 ? 'completed' : 'reading' // completed or reading
+                });
+            }
+        }
+
+        // Convert map to array and sort by last read date
+        let readingHistory = Array.from(novelsMap.values())
+            .sort((a, b) => new Date(b.lastReadAt) - new Date(a.lastReadAt));
+
+        // Get user's favorites to add isFavourite flag
+        const Favorite = require('../models/favorite');
+        const novelIds = readingHistory.map(item => item.novel._id);
+        const favorites = await Favorite.find({
+            user: userId,
+            novel: { $in: novelIds }
+        }).select('novel');
+
+        // Create a map of favorite novel IDs
+        const favoritesMap = {};
+        favorites.forEach(fav => {
+            favoritesMap[fav.novel.toString()] = true;
+        });
+
+        // Add isFavourite flag to each novel
+        readingHistory = readingHistory.map(item => {
+            const novelObj = item.novel.toObject ? item.novel.toObject() : item.novel;
+            novelObj.isFavourite = !!favoritesMap[item.novel._id.toString()];
+
+            return {
+                ...item,
+                novel: novelObj
+            };
+        });
+
+        console.log('✅ Final readingHistory:', readingHistory.length, 'novels');
+        console.log('📊 Response data:', JSON.stringify({
+            total: readingHistory.length,
+            novels: readingHistory.map(h => ({
+                novelId: h.novel._id,
+                novelTitle: h.novel.title,
+                isDeleted: h.novel.isDeleted,
+                status: h.status
+            }))
+        }, null, 2));
+
+        res.status(200).json({
+            success: true,
+            readingHistory,
+            total: readingHistory.length
+        });
+    } catch (error) {
+        console.error('Error fetching reading history:', error);
+        res.status(500).json({ error: error.message });
+    }
+};
+
+// Delete reading history for a specific novel
+exports.deleteReadingHistory = async (req, res) => {
+    try {
+        const userId = req.user.id;
+        const { novelId } = req.params;
+
+        const ReadingProgress = require('../models/readingProgress');
+        const result = await ReadingProgress.updateMany(
+            {
+                user: userId,
+                novel: novelId,
+                $or: [
+                    { isDeleted: false },
+                    { isDeleted: { $exists: false } }
+                ]
+            },
+            {
+                isDeleted: true,
+                updatedAt: new Date()
+            }
+        );
+
+        if (result.modifiedCount === 0) {
+            return res.status(404).json({
+                success: false,
+                message: 'No reading history found for this novel'
+            });
+        }
+
+        res.status(200).json({
+            success: true,
+            message: 'Reading history deleted successfully',
+            deletedCount: result.modifiedCount
+        });
+    } catch (error) {
+        console.error('Error deleting reading history:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Internal server error',
+            error: error.message
+        });
+    }
+};
+
+// Delete all reading history
+exports.deleteAllReadingHistory = async (req, res) => {
+    try {
+        const userId = req.user.id;
+
+        const ReadingProgress = require('../models/readingProgress');
+        const result = await ReadingProgress.updateMany(
+            {
+                user: userId,
+                $or: [
+                    { isDeleted: false },
+                    { isDeleted: { $exists: false } }
+                ]
+            },
+            {
+                isDeleted: true,
+                updatedAt: new Date()
+            }
+        );
+
+        if (result.modifiedCount === 0) {
+            return res.status(404).json({
+                success: false,
+                message: 'No reading history found'
+            });
+        }
+
+        res.status(200).json({
+            success: true,
+            message: 'All reading history deleted successfully',
+            deletedCount: result.modifiedCount
+        });
+    } catch (error) {
+        console.error('Error deleting all reading history:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Internal server error',
+            error: error.message
+        });
     }
 };
 
@@ -939,6 +1213,311 @@ exports.getMostLikedNovels = async (req, res) => {
 
     } catch (error) {
         console.error('Error fetching most liked novels:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Internal server error',
+            error: error.message
+        });
+    }
+};
+
+// Add novel to bookshelf
+exports.addToBookshelf = async (req, res) => {
+    try {
+        const userId = req.user.id;
+        const { novelId } = req.params;
+        const { rating = 0, notes = '' } = req.body;
+
+        // Validate rating
+        if (rating < 0 || rating > 5) {
+            return res.status(400).json({
+                success: false,
+                message: 'Rating must be between 0 and 5'
+            });
+        }
+
+        // Check if novel exists
+        const novel = await Novel.findById(novelId);
+        if (!novel) {
+            return res.status(404).json({
+                success: false,
+                message: 'Novel not found'
+            });
+        }
+
+        // Add or update bookshelf entry
+        const Bookshelf = require('../models/bookshelf');
+        const bookshelfEntry = await Bookshelf.findOneAndUpdate(
+            { user: userId, novel: novelId },
+            {
+                rating,
+                notes,
+                updatedAt: new Date()
+            },
+            { upsert: true, new: true, runValidators: true }
+        ).populate('novel', 'title coverImage author').populate('user', 'username');
+
+        res.status(200).json({
+            success: true,
+            message: 'Novel added to bookshelf successfully',
+            bookshelf: bookshelfEntry
+        });
+    } catch (error) {
+        console.error('Error adding to bookshelf:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Internal server error',
+            error: error.message
+        });
+    }
+};
+
+// Remove novel from bookshelf
+exports.removeFromBookshelf = async (req, res) => {
+    try {
+        const userId = req.user.id;
+        const { novelId } = req.params;
+
+        const Bookshelf = require('../models/bookshelf');
+        const result = await Bookshelf.findOneAndDelete({
+            user: userId,
+            novel: novelId
+        });
+
+        if (!result) {
+            return res.status(404).json({
+                success: false,
+                message: 'Bookshelf entry not found'
+            });
+        }
+
+        res.status(200).json({
+            success: true,
+            message: 'Novel removed from bookshelf successfully'
+        });
+    } catch (error) {
+        console.error('Error removing from bookshelf:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Internal server error',
+            error: error.message
+        });
+    }
+};
+
+// Get user's bookshelf (with filtering by status)
+exports.getUserBookshelf = async (req, res) => {
+    try {
+        const userId = req.user.id;
+
+        const Bookshelf = require('../models/bookshelf');
+        const bookshelfEntries = await Bookshelf.find({ user: userId })
+            .populate({
+                path: 'novel',
+                select: 'title coverImage author rating description genres status',
+                populate: {
+                    path: 'author',
+                    select: 'username profilePicture'
+                }
+            })
+            .sort({ updatedAt: -1 });
+
+        // Format response similar to completed novels
+        let bookshelf = bookshelfEntries.map(entry => {
+            const novelObj = entry.novel.toObject ? entry.novel.toObject() : entry.novel;
+
+            return {
+                _id: entry._id,
+                novel: novelObj,
+                rating: entry.rating,
+                notes: entry.notes,
+                addedAt: entry.addedAt,
+                updatedAt: entry.updatedAt
+            };
+        });
+
+        // Get user's favorites to add isFavourite flag
+        const Favorite = require('../models/favorite');
+        const novelIds = bookshelf.map(item => item.novel._id);
+        const favorites = await Favorite.find({
+            user: userId,
+            novel: { $in: novelIds }
+        }).select('novel');
+
+        // Create a map of favorite novel IDs
+        const favoritesMap = {};
+        favorites.forEach(fav => {
+            favoritesMap[fav.novel.toString()] = true;
+        });
+
+        // Add isFavourite flag to each novel
+        bookshelf = bookshelf.map(item => {
+            item.novel.isFavourite = !!favoritesMap[item.novel._id.toString()];
+            return item;
+        });
+
+        res.status(200).json({
+            success: true,
+            bookshelf,
+            total: bookshelf.length
+        });
+    } catch (error) {
+        console.error('Error fetching bookshelf:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Internal server error',
+            error: error.message
+        });
+    }
+};
+
+// Update bookshelf entry
+exports.updateBookshelfEntry = async (req, res) => {
+    try {
+        const userId = req.user.id;
+        const { novelId } = req.params;
+        const { rating, notes } = req.body;
+
+        // Validate rating if provided
+        if (rating !== undefined) {
+            if (rating < 0 || rating > 5) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Rating must be between 0 and 5'
+                });
+            }
+        }
+
+        const Bookshelf = require('../models/bookshelf');
+        const updateData = { updatedAt: new Date() };
+        if (rating !== undefined) updateData.rating = rating;
+        if (notes !== undefined) updateData.notes = notes;
+
+        const bookshelfEntry = await Bookshelf.findOneAndUpdate(
+            { user: userId, novel: novelId },
+            updateData,
+            { new: true, runValidators: true }
+        ).populate('novel', 'title coverImage author').populate('user', 'username');
+
+        if (!bookshelfEntry) {
+            return res.status(404).json({
+                success: false,
+                message: 'Bookshelf entry not found'
+            });
+        }
+
+        res.status(200).json({
+            success: true,
+            message: 'Bookshelf entry updated successfully',
+            bookshelf: bookshelfEntry
+        });
+    } catch (error) {
+        console.error('Error updating bookshelf entry:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Internal server error',
+            error: error.message
+        });
+    }
+};
+
+// Check if novel is in user's bookshelf
+exports.checkBookshelfStatus = async (req, res) => {
+    try {
+        const userId = req.user.id;
+        const { novelId } = req.params;
+
+        const Bookshelf = require('../models/bookshelf');
+        const bookshelfEntry = await Bookshelf.findOne({
+            user: userId,
+            novel: novelId
+        });
+
+        res.status(200).json({
+            success: true,
+            inBookshelf: !!bookshelfEntry,
+            bookshelf: bookshelfEntry || null
+        });
+    } catch (error) {
+        console.error('Error checking bookshelf status:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Internal server error',
+            error: error.message
+        });
+    }
+};
+
+// Toggle bookshelf - add or remove with one API
+exports.toggleBookshelf = async (req, res) => {
+    try {
+        const { novelId } = req.params;
+        const userId = req.user.id;
+
+        // Check if novel exists
+        const novel = await Novel.findById(novelId);
+        if (!novel) {
+            return res.status(404).json({
+                success: false,
+                message: 'Novel not found'
+            });
+        }
+
+        const Bookshelf = require('../models/bookshelf');
+
+        // Check if already in bookshelf
+        const existingEntry = await Bookshelf.findOne({
+            user: userId,
+            novel: novelId
+        });
+
+        let action, bookshelfEntry;
+
+        if (existingEntry) {
+            // Remove from bookshelf
+            await Bookshelf.findOneAndDelete({
+                user: userId,
+                novel: novelId
+            });
+            action = 'removed';
+
+            return res.status(200).json({
+                success: true,
+                message: 'Novel removed from bookshelf',
+                data: {
+                    novelId,
+                    action,
+                    inBookshelf: false
+                }
+            });
+        } else {
+            // Add to bookshelf
+            bookshelfEntry = await Bookshelf.findOneAndUpdate(
+                { user: userId, novel: novelId },
+                {
+                    rating: 0,
+                    notes: '',
+                    updatedAt: new Date()
+                },
+                { upsert: true, new: true, runValidators: true }
+            ).populate('novel', 'title coverImage author').populate('user', 'username');
+
+            action = 'added';
+
+            return res.status(200).json({
+                success: true,
+                message: 'Novel added to bookshelf',
+                data: {
+                    novelId,
+                    action,
+                    inBookshelf: true,
+                    bookshelf: bookshelfEntry
+                }
+            });
+        }
+
+    } catch (error) {
+        console.error('Error toggling bookshelf:', error);
         res.status(500).json({
             success: false,
             message: 'Internal server error',
