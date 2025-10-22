@@ -57,7 +57,8 @@ exports.createProfile = async (req, res) => {
       user.gender = gender;
       user.country = country;
       user.contentLanguage = contentLanguage;
-      user.username = username;
+      //username to lowercase
+      user.username = username.toLowerCase();
       user.bio = bio;
 
 

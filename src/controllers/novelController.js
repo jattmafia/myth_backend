@@ -73,9 +73,8 @@ exports.getNovels = async (req, res) => {
                 select: 'title chapterNumber createdAt'
             });
 
-        // Initialize favoritesMap and reviewsMap
+        // Initialize favoritesMap
         let favoritesMap = {};
-        let reviewsMap = {};
 
         if (userId) {
             // Get user favorites
@@ -146,12 +145,7 @@ exports.getDiscoverNovels = async (req, res) => {
 
         // Get latest releases (recently created novels) - only published/ongoing
         const latestReleases = await Novel.find({ status: { $in: ['published', 'ongoing'] } })
-            .populate('author', 'username profilePicture')
-            .populate({
-                path: 'chapters',
-                match: { status: 'published' },
-                select: 'title chapterNumber createdAt'
-            })
+            .select('title coverImage')
             .sort({ createdAt: -1 })
             .limit(limit);
 
@@ -180,29 +174,9 @@ exports.getDiscoverNovels = async (req, res) => {
                 $limit: limit
             },
             {
-                $lookup: {
-                    from: 'users',
-                    localField: 'author',
-                    foreignField: '_id',
-                    as: 'author',
-                    pipeline: [
-                        { $project: { username: 1, profilePicture: 1 } }
-                    ]
-                }
-            },
-            {
-                $unwind: '$author'
-            },
-            {
-                $lookup: {
-                    from: 'chapters',
-                    localField: '_id',
-                    foreignField: 'novel',
-                    as: 'chapters',
-                    pipeline: [
-                        { $match: { status: 'published' } },
-                        { $project: { title: 1, chapterNumber: 1, createdAt: 1 } }
-                    ]
+                $project: {
+                    title: 1,
+                    coverImage: 1
                 }
             }
         ]);
@@ -212,12 +186,7 @@ exports.getDiscoverNovels = async (req, res) => {
             averageRating: { $gte: 4.0 },
             status: { $in: ['published', 'ongoing'] }
         })
-            .populate('author', 'username profilePicture')
-            .populate({
-                path: 'chapters',
-                match: { status: 'published' },
-                select: 'title chapterNumber createdAt'
-            })
+            .select('title coverImage')
             .sort({ averageRating: -1, totalReviews: -1 })
             .limit(limit);
 
@@ -241,19 +210,6 @@ exports.getDiscoverNovels = async (req, res) => {
             userFavorites.forEach(fav => {
                 favoritesMap[fav.novel.toString()] = true;
             });
-
-            // Get user's reviews for these novels
-            const userReviews = await Review.find({
-                user: userId,
-                novel: { $in: allNovelIds }
-            }).select('novel likes');
-
-            userReviews.forEach(review => {
-                reviewsMap[review.novel.toString()] = {
-                    likesCount: review.likes.length,
-                    isLikedByUser: review.likes.some(likeUserId => likeUserId.toString() === userId)
-                };
-            });
         }
 
         // Transform novels to add extra info
@@ -261,16 +217,6 @@ exports.getDiscoverNovels = async (req, res) => {
             return novels.map(novel => {
                 const novelObj = novel.toObject ? novel.toObject() : novel;
                 novelObj.isFavourite = !!favoritesMap[novelObj._id.toString()];
-
-                const reviewInfo = reviewsMap[novelObj._id.toString()];
-                if (reviewInfo) {
-                    novelObj.userReview = {
-                        likesCount: reviewInfo.likesCount,
-                        isLikedByUser: reviewInfo.isLikedByUser
-                    };
-                } else {
-                    novelObj.userReview = null;
-                }
 
                 return novelObj;
             });
@@ -346,10 +292,7 @@ exports.getNovelById = async (req, res) => {
             .populate({
                 path: 'chapters',
                 match: { status: 'published' },
-                populate: {
-                    path: 'author',
-                    select: 'username profilePicture'
-                }
+                select: 'title chapterNumber createdAt viewCount coverImage' // Exclude content and author to make API lighter
             });
 
         if (!novel) {
@@ -393,6 +336,50 @@ exports.getNovelById = async (req, res) => {
             return chapterObj;
         });
 
+        // Attach per-chapter totalReviews (chapter-wise counts)
+        try {
+            const ChapterReview = require('../models/chapterReview');
+            const mongoose = require('mongoose');
+            // Use novel.chapters to get original ids (safer if chaptersWithProgress modified)
+            const chapterIds = (novel.chapters || []).map(c => c._id).filter(Boolean);
+
+            if (chapterIds.length > 0) {
+                const objIds = chapterIds.map(id => new mongoose.Types.ObjectId(id));
+                const agg = await ChapterReview.aggregate([
+                    { $match: { chapter: { $in: objIds } } },
+                    { $group: { _id: '$chapter', totalReviews: { $sum: 1 } } }
+                ]);
+
+               
+                const counts = {};
+                agg.forEach(r => { counts[r._id.toString()] = r.totalReviews || 0; });
+
+                // If user is logged in, find which chapters they've rated
+                let userRatedSet = new Set();
+                if (userId) {
+                    try {
+                        const userRated = await ChapterReview.find({ user: userId, chapter: { $in: objIds } }).select('chapter');
+                        userRated.forEach(ur => userRatedSet.add(ur.chapter.toString()));
+                    } catch (e) {
+                        console.error('Error fetching user chapter reviews:', e);
+                    }
+                }
+
+                chaptersWithProgress.forEach(ch => {
+                    const idStr = ch._id.toString();
+                    ch.totalReviews = counts[idStr] || 0;
+                    ch.isUserRated = userId ? userRatedSet.has(idStr) : false;
+                });
+            } else {
+                // Ensure field exists with zero for all chapters
+                chaptersWithProgress.forEach(ch => { ch.totalReviews = 0; });
+            }
+        } catch (err) {
+            console.error('Error aggregating chapter review counts:', err);
+            // fallback: ensure field exists
+            chaptersWithProgress.forEach(ch => { ch.totalReviews = 0; });
+        }
+
         // Calculate overall novel progress
         let overallProgress = 0;
         let completedChapters = 0;
@@ -402,27 +389,11 @@ exports.getNovelById = async (req, res) => {
             overallProgress = Math.round((completedChapters / chaptersWithProgress.length) * 100);
         }
 
-        // Get chapter statistics (including all chapters, not just published)
-        const Chapter = require('../models/chapter');
-        const allChapters = await Chapter.find({ novel: novelId });
-
-        const chapterStats = {
-            totalChapters: allChapters.length,
-            publishedChapters: allChapters.filter(ch => ch.status === 'published').length,
-            draftChapters: allChapters.filter(ch => ch.status === 'draft').length,
-            totalViews: allChapters.reduce((sum, ch) => sum + (ch.viewCount || 0), 0),
-            latestChapter: allChapters.length > 0 ? {
-                title: allChapters[allChapters.length - 1].title,
-                chapterNumber: allChapters[allChapters.length - 1].chapterNumber,
-                createdAt: allChapters[allChapters.length - 1].createdAt,
-                status: allChapters[allChapters.length - 1].status
-            } : null
-        };
+        // ...existing code...
 
         // Build response
         const novelData = novel.toObject();
         novelData.chapters = chaptersWithProgress;
-        novelData.chapterStats = chapterStats;
         novelData.userProgress = {
             overallProgress,
             completedChapters,
@@ -437,8 +408,17 @@ exports.getNovelById = async (req, res) => {
                 novel: novelId
             });
             novelData.isBookshelf = !!bookshelfEntry;
+
+            // Check if novel is favorited by user
+            const Favorite = require('../models/favorite');
+            const favoriteEntry = await Favorite.findOne({
+                user: userId,
+                novel: novelId
+            });
+            novelData.isFavourite = !!favoriteEntry;
         } else {
             novelData.isBookshelf = false;
+            novelData.isFavourite = false;
         }
 
         res.status(200).json(novelData);

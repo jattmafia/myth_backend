@@ -6,6 +6,7 @@ const userRoutes = require('./routes/user_route');
 const novelRoutes = require('./routes/novel_route');
 const chapterRoutes = require('./routes/chapter_route');
 const reviewRoutes = require('./routes/review_route');
+const chapterReviewRoutes = require('./routes/chapter_review_route');
 const { use } = require('passport');
 
 const app = express();
@@ -55,6 +56,7 @@ app.use('/api/chapter', chapterRoutes);
 
 // Add review routes
 app.use('/api/review', reviewRoutes);
+app.use('/api/chapter-review', chapterReviewRoutes);
 
 // /route for testing
 app.get('/api', (req, res) => {

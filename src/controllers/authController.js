@@ -27,7 +27,7 @@ exports.googleLogin = async (req, res) => {
     const googleId = payload.sub;
     const email = payload.email;
     const loginType = 'google';
-    const username = payload.email; // Google doesn't provide phone number by default
+    const username = payload.email.toLowerCase(); // Google doesn't provide phone number by default
 
 
     // Check if the user already exists
@@ -295,7 +295,7 @@ exports.loginUser = async (req, res) => {
 
   try {
     const user = await User.findOne({
-      $or: [{ email: emailOrUsername }, { username: emailOrUsername }],
+      $or: [{ email: emailOrUsername }, { username: emailOrUsername.toLowerCase() }],
     });
     if (!user) {
       return res.status(404).json({ message: 'User not found' });
