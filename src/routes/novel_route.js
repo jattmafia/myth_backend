@@ -28,8 +28,8 @@ router.get('/view/recently-viewed', verifyToken, novel.getUserRecentlyViewed);
 // Favorite/Like routes (both American and British spellings)
 router.post('/favorite/:novelId', verifyToken, novel.toggleNovelFavorite);
 router.post('/favourite/:novelId', verifyToken, novel.toggleNovelFavorite); // British spelling
-router.get('/favorites', verifyToken, novel.getUserFavorites);
-router.get('/favourites', verifyToken, novel.getUserFavorites); // British spelling
+router.get('/favorite', verifyToken, novel.getUserFavorites);
+router.get('/favourite', verifyToken, novel.getUserFavorites); // British spelling
 router.get('/favorite/status/:novelId', verifyToken, novel.checkNovelFavoriteStatus);
 router.get('/favourite/status/:novelId', verifyToken, novel.checkNovelFavoriteStatus); // British spelling
 router.get('/favorite/stats/:novelId', verifyToken, novel.getNovelLikeStats);
