@@ -5,6 +5,10 @@ const {
     getUserStatistics,
     updateUserProfile,
     changePassword
+    , followUser
+    , unfollowUser
+    , getFollowers
+    , getFollowing
 } = require('../controllers/userController');
 const { verifyToken } = require('../middleware/authMiddleware');
 const upload = require('../middleware/uploadMiddleware');
@@ -16,5 +20,15 @@ router.get('/profile', verifyToken, getUserProfile);
 router.get('/statistics', verifyToken, getUserStatistics);
 router.put('/profile', verifyToken, upload.single('profilePicture'), updateUserProfile);
 router.put('/change-password', verifyToken, changePassword);
+
+// Follow/unfollow routes
+router.post('/follow/:id', verifyToken, followUser);
+router.post('/unfollow/:id', verifyToken, unfollowUser);
+
+// Get followers / following - explicit routes to avoid optional-param parsing issues
+router.get('/followers', verifyToken, getFollowers);
+router.get('/followers/:id', verifyToken, getFollowers);
+router.get('/following', verifyToken, getFollowing);
+router.get('/following/:id', verifyToken, getFollowing);
 
 module.exports = router;

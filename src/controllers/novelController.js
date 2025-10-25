@@ -336,50 +336,6 @@ exports.getNovelById = async (req, res) => {
             return chapterObj;
         });
 
-        // Attach per-chapter totalReviews (chapter-wise counts)
-        try {
-            const ChapterReview = require('../models/chapterReview');
-            const mongoose = require('mongoose');
-            // Use novel.chapters to get original ids (safer if chaptersWithProgress modified)
-            const chapterIds = (novel.chapters || []).map(c => c._id).filter(Boolean);
-
-            if (chapterIds.length > 0) {
-                const objIds = chapterIds.map(id => new mongoose.Types.ObjectId(id));
-                const agg = await ChapterReview.aggregate([
-                    { $match: { chapter: { $in: objIds } } },
-                    { $group: { _id: '$chapter', totalReviews: { $sum: 1 } } }
-                ]);
-
-               
-                const counts = {};
-                agg.forEach(r => { counts[r._id.toString()] = r.totalReviews || 0; });
-
-                // If user is logged in, find which chapters they've rated
-                let userRatedSet = new Set();
-                if (userId) {
-                    try {
-                        const userRated = await ChapterReview.find({ user: userId, chapter: { $in: objIds } }).select('chapter');
-                        userRated.forEach(ur => userRatedSet.add(ur.chapter.toString()));
-                    } catch (e) {
-                        console.error('Error fetching user chapter reviews:', e);
-                    }
-                }
-
-                chaptersWithProgress.forEach(ch => {
-                    const idStr = ch._id.toString();
-                    ch.totalReviews = counts[idStr] || 0;
-                    ch.isUserRated = userId ? userRatedSet.has(idStr) : false;
-                });
-            } else {
-                // Ensure field exists with zero for all chapters
-                chaptersWithProgress.forEach(ch => { ch.totalReviews = 0; });
-            }
-        } catch (err) {
-            console.error('Error aggregating chapter review counts:', err);
-            // fallback: ensure field exists
-            chaptersWithProgress.forEach(ch => { ch.totalReviews = 0; });
-        }
-
         // Calculate overall novel progress
         let overallProgress = 0;
         let completedChapters = 0;
@@ -416,9 +372,19 @@ exports.getNovelById = async (req, res) => {
                 novel: novelId
             });
             novelData.isFavourite = !!favoriteEntry;
+
+            // Check if user follows the author
+            if (novelData.author && novelData.author._id) {
+                const User = require('../models/user');
+                const currentUser = await User.findById(userId).select('following');
+                novelData.author.isFollowed = currentUser && currentUser.following.map(id => id.toString()).includes(novelData.author._id.toString());
+            }
         } else {
             novelData.isBookshelf = false;
             novelData.isFavourite = false;
+            if (novelData.author) {
+                novelData.author.isFollowed = false;
+            }
         }
 
         res.status(200).json(novelData);

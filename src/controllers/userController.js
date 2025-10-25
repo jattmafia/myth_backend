@@ -87,7 +87,7 @@ exports.getUserProfile = async (req, res) => {
   try {
     const userId = req.user.id;
 
-    const user = await User.findById(userId).select('-password');
+    const user = await User.findById(userId).select('-password -followers -following');
 
     if (!user) {
       return res.status(404).json({
@@ -96,9 +96,13 @@ exports.getUserProfile = async (req, res) => {
       });
     }
 
-    // Transform user object to include full URL for profile picture
+    // Transform user object to include follow counts
     const userObj = user.toObject();
 
+    // Get the full user document to get array lengths
+    const fullUser = await User.findById(userId);
+    userObj.followersCount = fullUser.followers.length;
+    userObj.followingCount = fullUser.following.length;
 
     res.status(200).json({
       success: true,
@@ -312,5 +316,125 @@ exports.changePassword = async (req, res) => {
       message: 'Internal server error',
       error: error.message
     });
+  }
+};
+// Follow a user
+exports.followUser = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const targetUserId = req.params.id;
+
+    if (userId === targetUserId) {
+      return res.status(400).json({ success: false, message: "You can't follow yourself." });
+    }
+
+    const user = await User.findById(userId);
+    const targetUser = await User.findById(targetUserId);
+
+    if (!user || !targetUser) {
+      return res.status(404).json({ success: false, message: "User not found." });
+    }
+
+    // Prevent duplicate follows
+    if (user.following.includes(targetUserId)) {
+      return res.status(400).json({ success: false, message: "Already following this user." });
+    }
+
+    user.following.push(targetUserId);
+    targetUser.followers.push(userId);
+
+    await user.save();
+    await targetUser.save();
+
+    res.status(200).json({ success: true, message: "User followed successfully." });
+  } catch (error) {
+    console.error('Error following user:', error);
+    res.status(500).json({ success: false, message: 'Internal server error', error: error.message });
+  }
+};
+
+// Unfollow a user
+exports.unfollowUser = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const targetUserId = req.params.id;
+
+    if (userId === targetUserId) {
+      return res.status(400).json({ success: false, message: "You can't unfollow yourself." });
+    }
+
+    const user = await User.findById(userId);
+    const targetUser = await User.findById(targetUserId);
+
+    if (!user || !targetUser) {
+      return res.status(404).json({ success: false, message: "User not found." });
+    }
+
+    // Prevent unfollow if not following
+    if (!user.following.includes(targetUserId)) {
+      return res.status(400).json({ success: false, message: "You are not following this user." });
+    }
+
+    user.following = user.following.filter(id => id.toString() !== targetUserId);
+    targetUser.followers = targetUser.followers.filter(id => id.toString() !== userId);
+
+    await user.save();
+    await targetUser.save();
+
+    res.status(200).json({ success: true, message: "User unfollowed successfully." });
+  } catch (error) {
+    console.error('Error unfollowing user:', error);
+    res.status(500).json({ success: false, message: 'Internal server error', error: error.message });
+  }
+};
+
+// Get followers list for a user (or current user if no id provided)
+exports.getFollowers = async (req, res) => {
+  try {
+    const requestedUserId = req.params.id || req.user.id;
+    const limit = parseInt(req.query.limit, 10) || 100;
+    const skip = parseInt(req.query.skip, 10) || 0;
+
+    const user = await User.findById(requestedUserId).select('followers');
+    if (!user) return res.status(404).json({ success: false, message: 'User not found' });
+
+    const followerIds = user.followers.slice(skip, skip + limit);
+
+    const followers = await User.find({ _id: { $in: followerIds } }).select('_id username profilePicture');
+
+    // Preserve order as in followerIds
+    const followersMap = {};
+    followers.forEach(f => { followersMap[f._id.toString()] = f; });
+    const ordered = followerIds.map(id => followersMap[id.toString()]).filter(Boolean);
+
+    res.status(200).json({ success: true, count: ordered.length, data: ordered });
+  } catch (error) {
+    console.error('Error fetching followers:', error);
+    res.status(500).json({ success: false, message: 'Internal server error', error: error.message });
+  }
+};
+
+// Get following list for a user (or current user if no id provided)
+exports.getFollowing = async (req, res) => {
+  try {
+    const requestedUserId = req.params.id || req.user.id;
+    const limit = parseInt(req.query.limit, 10) || 100;
+    const skip = parseInt(req.query.skip, 10) || 0;
+
+    const user = await User.findById(requestedUserId).select('following');
+    if (!user) return res.status(404).json({ success: false, message: 'User not found' });
+
+    const followingIds = user.following.slice(skip, skip + limit);
+
+    const following = await User.find({ _id: { $in: followingIds } }).select('_id username profilePicture');
+
+    const followingMap = {};
+    following.forEach(f => { followingMap[f._id.toString()] = f; });
+    const ordered = followingIds.map(id => followingMap[id.toString()]).filter(Boolean);
+
+    res.status(200).json({ success: true, count: ordered.length, data: ordered });
+  } catch (error) {
+    console.error('Error fetching following:', error);
+    res.status(500).json({ success: false, message: 'Internal server error', error: error.message });
   }
 };
