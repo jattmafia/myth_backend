@@ -48,6 +48,7 @@ exports.createChapter = async (req, res) => {
         const novel = await Novel.findById(novelId);
         if (novel) {
             novel.chapters.push(savedChapter._id);
+            novel.updatedAt = new Date();
             await novel.save();
         }
         res.status(201).json(chapter);

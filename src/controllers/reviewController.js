@@ -1,6 +1,7 @@
 const Review = require('../models/review');
 const Novel = require('../models/novel');
 const Favorite = require('../models/favorite');
+const ReadingProgress = require('../models/readingProgress');
 
 // Add or update a review for a novel (upsert behavior)
 exports.addReview = async (req, res) => {
@@ -60,6 +61,25 @@ exports.addReview = async (req, res) => {
                     novelStats: stats
                 }
             });
+        }
+
+        // If user hasn't reviewed before, ensure they've read at least one chapter of the novel
+        if (!review) {
+            const hasRead = await ReadingProgress.exists({
+                user: userId,
+                novel: novelId,
+                $or: [
+                    { progressPercent: { $gt: 0 } },
+                    { isCompleted: true }
+                ]
+            });
+
+            if (!hasRead) {
+                return res.status(403).json({
+                    success: false,
+                    message: 'You must read at least one chapter of this novel before adding a review.'
+                });
+            }
         }
 
         // Create new review (comment is optional)
