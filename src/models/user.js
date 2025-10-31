@@ -82,6 +82,11 @@ const UserSchema = new mongoose.Schema({
     ref: 'User',
     default: []
   }],
+  coins: {
+    type: Number,
+    default: 0,
+    min: 0
+  },
 
 });
 

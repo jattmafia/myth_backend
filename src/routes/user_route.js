@@ -9,6 +9,10 @@ const {
     , unfollowUser
     , getFollowers
     , getFollowing
+    , rewardAdCoins
+    , getUserCoins
+    , deductCoins
+    , getCoinTransactionHistory
 } = require('../controllers/userController');
 const { verifyToken } = require('../middleware/authMiddleware');
 const upload = require('../middleware/uploadMiddleware');
@@ -30,5 +34,11 @@ router.get('/followers', verifyToken, getFollowers);
 router.get('/followers/:id', verifyToken, getFollowers);
 router.get('/following', verifyToken, getFollowing);
 router.get('/following/:id', verifyToken, getFollowing);
+
+// Coin reward routes
+router.post('/reward-ad', verifyToken, rewardAdCoins);
+router.get('/coins', verifyToken, getUserCoins);
+router.post('/deduct-coins', verifyToken, deductCoins);
+router.get('/coin-history', verifyToken, getCoinTransactionHistory);
 
 module.exports = router;

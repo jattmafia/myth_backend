@@ -20,17 +20,23 @@ exports.createNovel = async (req, res) => {
 
 
     try {
-        const { title, description, hookupDescription, language } = req.body;
+        const { title, description, hookupDescription, language, categories, pricingModel } = req.body;
         const coverImage = req.file;
         const user = await User.findById(req.user.id);
         if (!user) {
             return res.status(404).json({ message: 'User not found' });
         }
 
-        console.log('Received data:', { title, description, hookupDescription, language, coverImage });
+        console.log('Received data:', { title, description, hookupDescription, language, coverImage, pricingModel });
 
         if (title === undefined || description === undefined || coverImage === undefined) {
             return res.status(400).json({ message: 'title, description, and cover image are required' });
+        }
+
+        // Validate pricing model
+        const pricing = pricingModel || 'free';
+        if (!['free', 'paid'].includes(pricing)) {
+            return res.status(400).json({ message: 'pricingModel must be either "free" or "paid"' });
         }
 
         const uploadParams = {
@@ -50,7 +56,9 @@ exports.createNovel = async (req, res) => {
             coverImage: uploadResult.Key,
             author: req.user.id,
             hookupDescription,
-            language
+            language,
+            categories: categories || [],
+            pricingModel: pricing
         });
 
         await newNovel.save();
@@ -128,7 +136,9 @@ exports.getNovels = async (req, res) => {
 //fetch novel by user id
 exports.getNovelsByUser = async (req, res) => {
     try {
-        const novels = await Novel.find({ author: req.user.id }).populate('author', 'username');
+        const novels = await Novel.find({ author: req.user.id })
+            .populate('author', 'username profilePicture')
+            .select('title author chapters language coverImage description categories status totalViews totalLikes averageRating totalReviews pricingModel createdAt updatedAt');
 
         res.status(200).json(novels);
     } catch (error) {
@@ -254,7 +264,7 @@ exports.updateNovel = async (req, res) => {
             return res.status(400).json({ message: 'Request body is required and must be valid JSON' });
         }
 
-        const { title, description, hookupDescription, language, status } = req.body;
+        const { title, description, hookupDescription, language, status, categories, pricingModel } = req.body;
 
         const novel = await Novel.findById(novelId);
 
@@ -265,12 +275,21 @@ exports.updateNovel = async (req, res) => {
             return res.status(403).json({ message: 'Unauthorized' });
         }
 
+        // Validate pricing model if provided
+        if (pricingModel !== undefined) {
+            if (!['free', 'paid'].includes(pricingModel)) {
+                return res.status(400).json({ message: 'pricingModel must be either "free" or "paid"' });
+            }
+        }
+
         // Update fields only if they are provided
         if (title !== undefined) novel.title = title;
         if (description !== undefined) novel.description = description;
         if (hookupDescription !== undefined) novel.hookupDescription = hookupDescription;
         if (language !== undefined) novel.language = language;
         if (status !== undefined) novel.status = status;
+        if (categories !== undefined) novel.categories = categories;
+        if (pricingModel !== undefined) novel.pricingModel = pricingModel;
 
         await novel.save();
         res.status(200).json(novel);
@@ -320,6 +339,22 @@ exports.getNovelById = async (req, res) => {
             });
         }
 
+        // Get chapter access info for paid novels
+        const ChapterAccess = require('../models/chapterAccess');
+        let userAccessMap = {};
+
+        if (userId && novel.pricingModel === 'paid' && novel.chapters && novel.chapters.length > 0) {
+            const chapterIds = novel.chapters.map(ch => ch._id);
+            const userAccess = await ChapterAccess.find({
+                user: userId,
+                chapter: { $in: chapterIds }
+            }).select('chapter accessType');
+
+            userAccess.forEach(access => {
+                userAccessMap[access.chapter.toString()] = access.accessType;
+            });
+        }
+
         // Add progress data to each chapter
         const chaptersWithProgress = novel.chapters.map(chapter => {
             const chapterObj = chapter.toObject();
@@ -332,6 +367,27 @@ exports.getNovelById = async (req, res) => {
                 isCompleted: false,
                 lastReadAt: null
             };
+
+            // Add chapter lock status based on pricing model
+            if (novel.pricingModel === 'free') {
+                // All chapters are accessible in free novels
+                chapterObj.isLocked = false;
+            } else {
+                // Paid novel logic
+                if (chapter.chapterNumber <= 5) {
+                    // Chapters 1-5 are free
+                    chapterObj.isLocked = false;
+                } else {
+                    // Chapters 6+ require purchase/unlock
+                    if (userId && (userAccessMap[chapterId] === 'purchased' || userAccessMap[chapterId] === 'coin' || userAccessMap[chapterId] === 'ad')) {
+                        // User has unlocked this chapter (via purchase, coin, or ad)
+                        chapterObj.isLocked = false;
+                    } else {
+                        // Either not logged in or not unlocked
+                        chapterObj.isLocked = true;
+                    }
+                }
+            }
 
             return chapterObj;
         });

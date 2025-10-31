@@ -31,9 +31,14 @@ const NovelSchema = new mongoose.Schema({
     type: String,
     required: true
   },
+  // Categories/genres for the novel (e.g. romance, mystery)
+  categories: {
+    type: [String],
+    default: []
+  },
   status: {
     type: String,
-    enum: ['draft', 'published','ongoing'],
+    enum: ['draft', 'published', 'ongoing'],
     default: 'draft'
   },
   totalViews: {
@@ -53,6 +58,12 @@ const NovelSchema = new mongoose.Schema({
   totalReviews: {
     type: Number,
     default: 0
+  },
+  // Novel pricing model: 'free' or 'paid'
+  pricingModel: {
+    type: String,
+    enum: ['free', 'paid'],
+    default: 'free'
   },
   createdAt: {
     type: Date,

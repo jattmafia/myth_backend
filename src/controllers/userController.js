@@ -438,3 +438,190 @@ exports.getFollowing = async (req, res) => {
     res.status(500).json({ success: false, message: 'Internal server error', error: error.message });
   }
 };
+
+// Reward user with coins for watching an ad
+exports.rewardAdCoins = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { coinsEarned = 4 } = req.body; // Default 10 coins per ad, can be customized
+
+    // Validate coins amount
+    if (coinsEarned <= 0 || coinsEarned > 1000) {
+      return res.status(400).json({
+        success: false,
+        message: 'Coins must be between 1 and 1000'
+      });
+    }
+
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: 'User not found'
+      });
+    }
+
+    // Add coins to user
+    user.coins += coinsEarned;
+    await user.save();
+
+    // Log transaction
+    const CoinTransaction = require('../models/coinTransaction');
+    await CoinTransaction.create({
+      user: userId,
+      type: 'earned',
+      amount: coinsEarned,
+      reason: 'Watched ad',
+      balanceAfter: user.coins
+    });
+
+    res.status(200).json({
+      success: true,
+      message: `Earned ${coinsEarned} coins`,
+      data: {
+        coinsEarned,
+        totalCoins: user.coins
+      }
+    });
+  } catch (error) {
+    console.error('Error rewarding ad coins:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error',
+      error: error.message
+    });
+  }
+};
+
+// Get user's coin balance
+exports.getUserCoins = async (req, res) => {
+  try {
+    const userId = req.user.id;
+
+    const user = await User.findById(userId).select('coins');
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: 'User not found'
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      data: {
+        coins: user.coins
+      }
+    });
+  } catch (error) {
+    console.error('Error fetching user coins:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error',
+      error: error.message
+    });
+  }
+};
+
+// Deduct coins for purchasing novel content (internal use)
+exports.deductCoins = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { coinsToDeduce, description } = req.body;
+
+    if (!coinsToDeduce || coinsToDeduce <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'Valid coins amount is required'
+      });
+    }
+
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: 'User not found'
+      });
+    }
+
+    if (user.coins < coinsToDeduce) {
+      return res.status(400).json({
+        success: false,
+        message: 'Insufficient coins',
+        currentCoins: user.coins,
+        requiredCoins: coinsToDeduce
+      });
+    }
+
+    // Deduct coins
+    user.coins -= coinsToDeduce;
+    await user.save();
+
+    // Log transaction
+    const CoinTransaction = require('../models/coinTransaction');
+    await CoinTransaction.create({
+      user: userId,
+      type: 'spent',
+      amount: coinsToDeduce,
+      reason: description || 'Novel purchase',
+      description,
+      balanceAfter: user.coins
+    });
+
+    res.status(200).json({
+      success: true,
+      message: `Spent ${coinsToDeduce} coins${description ? ` for ${description}` : ''}`,
+      data: {
+        coinsDeduce: coinsToDeduce,
+        remainingCoins: user.coins
+      }
+    });
+  } catch (error) {
+    console.error('Error deducting coins:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error',
+      error: error.message
+    });
+  }
+};
+
+// Get coin transaction history for user
+exports.getCoinTransactionHistory = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const limit = parseInt(req.query.limit, 10) || 50;
+    const page = parseInt(req.query.page, 10) || 1;
+    const skip = (page - 1) * limit;
+
+    const CoinTransaction = require('../models/coinTransaction');
+
+    // Get total count
+    const totalTransactions = await CoinTransaction.countDocuments({ user: userId });
+
+    // Get paginated transactions
+    const transactions = await CoinTransaction.find({ user: userId })
+      .sort({ createdAt: -1 })
+      .limit(limit)
+      .skip(skip);
+
+    res.status(200).json({
+      success: true,
+      data: {
+        transactions,
+        pagination: {
+          currentPage: page,
+          totalPages: Math.ceil(totalTransactions / limit),
+          totalTransactions,
+          limit
+        }
+      }
+    });
+  } catch (error) {
+    console.error('Error fetching coin transaction history:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error',
+      error: error.message
+    });
+  }
+};
