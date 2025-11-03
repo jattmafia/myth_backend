@@ -436,7 +436,7 @@ exports.unlockByCoins = async (req, res) => {
     }
 
     // Fixed coin price per chapter (can be configurable)
-    const coinPrice = 4;
+    const coinPrice = chapter.coinCost || 4;
 
     if (user.coins < coinPrice) {
       return res.status(400).json({

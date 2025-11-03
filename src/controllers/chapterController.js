@@ -16,7 +16,7 @@ const s3 = new AWS.S3({
 exports.createChapter = async (req, res) => {
     try {
         const coverImage = req.file;
-        const { title, novelId, authorMessage, chapterNumber, status } = req.body;
+        const { title, novelId, authorMessage, chapterNumber, status, coinCost } = req.body;
         //check chapter number is unique for the novel 
         const existingChapter = await Chapter.findOne({ novel: novelId, chapterNumber: chapterNumber });
 
@@ -38,7 +38,8 @@ exports.createChapter = async (req, res) => {
             authorMessage,
             chapterNumber: chapterNumber,
             coverImage: uploadResult.Key,
-            status: status || 'draft'
+            status: status || 'draft',
+            coinCost: coinCost || 0
         });
 
 
@@ -119,7 +120,7 @@ exports.getChapterById = async (req, res) => {
 exports.updateChapter = async (req, res) => {
     try {
         const { chapterId } = req.params;
-        const { console, title, authorMessage, chapterNumber, status, content } = req.body;
+        const { console, title, authorMessage, chapterNumber, status, content, coinCost } = req.body;
         const coverImage = req.file;
         const chapter = await Chapter.findById(chapterId);
         if (!chapter) {
@@ -142,8 +143,9 @@ exports.updateChapter = async (req, res) => {
         if (title) chapter.title = title;
         if (authorMessage) chapter.authorMessage = authorMessage;
         if (chapterNumber) chapter.chapterNumber = chapterNumber;
+        if (coinCost !== undefined) chapter.coinCost = coinCost;
         chapter.content = content;
-        chapter.status = status || 'draft';
+        chapter.status = status || chapter.status;
         await chapter.save();
         res.status(200).json(chapter);
     } catch (error) {

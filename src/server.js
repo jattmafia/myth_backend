@@ -8,6 +8,7 @@ const chapterRoutes = require('./routes/chapter_route');
 const reviewRoutes = require('./routes/review_route');
 const chapterAccessRoutes = require('./routes/chapterAccess_route');
 const writerEarningRoutes = require('./routes/writerEarning_route');
+const categoryRoutes = require('./routes/category_route');
 const { use } = require('passport');
 
 const app = express();
@@ -63,6 +64,9 @@ app.use('/api/chapter-access', chapterAccessRoutes);
 
 // Add writer earning routes
 app.use('/api/writer-earning', writerEarningRoutes);
+
+// Add category routes
+app.use('/api/categories', categoryRoutes);
 
 // /route for testing
 app.get('/api', (req, res) => {

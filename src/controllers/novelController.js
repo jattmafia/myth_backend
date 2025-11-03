@@ -2,6 +2,7 @@
 const AWS = require('aws-sdk');
 const Novel = require('../models/novel'); // Import the Novel model
 const User = require('../models/user'); // Import the User model
+const Category = require('../models/category');
 const ReadingProgress = require('../models/readingProgress'); // Import ReadingProgress model
 const ChapterView = require('../models/chapterView'); // Import ChapterView model
 const Favorite = require('../models/favorite'); // Import Favorite model
@@ -20,7 +21,7 @@ exports.createNovel = async (req, res) => {
 
 
     try {
-        const { title, description, hookupDescription, language, categories, pricingModel } = req.body;
+        const { title, description, hookupDescription, language, categories, subcategories, pricingModel } = req.body;
         const coverImage = req.file;
         const user = await User.findById(req.user.id);
         if (!user) {
@@ -50,6 +51,47 @@ exports.createNovel = async (req, res) => {
         const uploadResult = await s3.upload(uploadParams).promise();
 
         console.log('File uploaded successfully:', uploadResult);
+        // Resolve categories (accept slugs or ids) and store ObjectId refs
+        let categoryIds = [];
+        if (Array.isArray(categories) && categories.length > 0) {
+            for (const item of categories) {
+                let cat = null;
+                if (item && typeof item === 'string') {
+                    if (require('mongoose').Types.ObjectId.isValid(item)) {
+                        cat = await Category.findById(item);
+                    }
+                    if (!cat) {
+                        const slug = item.toString().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+                        cat = await Category.findOne({ slug });
+                    }
+                }
+                if (!cat) {
+                    return res.status(400).json({ success: false, message: `Category not found: ${item}` });
+                }
+                categoryIds.push(cat._id);
+            }
+        }
+        // Resolve subcategories (accept slugs or ids) and store ObjectId refs
+        let subcategoryIds = [];
+        if (Array.isArray(subcategories) && subcategories.length > 0) {
+            for (const item of subcategories) {
+                let cat = null;
+                if (item && typeof item === 'string') {
+                    if (require('mongoose').Types.ObjectId.isValid(item)) {
+                        cat = await Category.findById(item);
+                    }
+                    if (!cat) {
+                        const slug = item.toString().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+                        cat = await Category.findOne({ slug });
+                    }
+                }
+                if (!cat) {
+                    return res.status(400).json({ success: false, message: `Subcategory not found: ${item}` });
+                }
+                subcategoryIds.push(cat._id);
+            }
+        }
+
         const newNovel = new Novel({
             title,
             description,
@@ -57,7 +99,8 @@ exports.createNovel = async (req, res) => {
             author: req.user.id,
             hookupDescription,
             language,
-            categories: categories || [],
+            categories: categoryIds,
+            subcategories: subcategoryIds,
             pricingModel: pricing
         });
 
@@ -138,7 +181,9 @@ exports.getNovelsByUser = async (req, res) => {
     try {
         const novels = await Novel.find({ author: req.user.id })
             .populate('author', 'username profilePicture')
-            .select('title author chapters language coverImage description categories status totalViews totalLikes averageRating totalReviews pricingModel createdAt updatedAt');
+            .populate('categories', 'name slug')
+            .populate('subcategories', 'name slug')
+            .select('title author chapters language coverImage description categories subcategories status totalViews totalLikes averageRating totalReviews pricingModel createdAt updatedAt');
 
         res.status(200).json(novels);
     } catch (error) {
@@ -264,7 +309,7 @@ exports.updateNovel = async (req, res) => {
             return res.status(400).json({ message: 'Request body is required and must be valid JSON' });
         }
 
-        const { title, description, hookupDescription, language, status, categories, pricingModel } = req.body;
+        const { title, description, hookupDescription, language, status, categories, subcategories, pricingModel } = req.body;
 
         const novel = await Novel.findById(novelId);
 
@@ -288,7 +333,54 @@ exports.updateNovel = async (req, res) => {
         if (hookupDescription !== undefined) novel.hookupDescription = hookupDescription;
         if (language !== undefined) novel.language = language;
         if (status !== undefined) novel.status = status;
-        if (categories !== undefined) novel.categories = categories;
+        if (categories !== undefined) {
+            // Resolve categories to ObjectIds
+            if (!Array.isArray(categories)) {
+                return res.status(400).json({ message: 'categories must be an array of ids or slugs' });
+            }
+            const resolved = [];
+            for (const item of categories) {
+                let cat = null;
+                if (item && typeof item === 'string') {
+                    if (require('mongoose').Types.ObjectId.isValid(item)) {
+                        cat = await Category.findById(item);
+                    }
+                    if (!cat) {
+                        const slug = item.toString().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+                        cat = await Category.findOne({ slug });
+                    }
+                }
+                if (!cat) {
+                    return res.status(400).json({ message: `Category not found: ${item}` });
+                }
+                resolved.push(cat._id);
+            }
+            novel.categories = resolved;
+        }
+        if (subcategories !== undefined) {
+            // Resolve subcategories to ObjectIds
+            if (!Array.isArray(subcategories)) {
+                return res.status(400).json({ message: 'subcategories must be an array of ids or slugs' });
+            }
+            const resolvedSubs = [];
+            for (const item of subcategories) {
+                let cat = null;
+                if (item && typeof item === 'string') {
+                    if (require('mongoose').Types.ObjectId.isValid(item)) {
+                        cat = await Category.findById(item);
+                    }
+                    if (!cat) {
+                        const slug = item.toString().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+                        cat = await Category.findOne({ slug });
+                    }
+                }
+                if (!cat) {
+                    return res.status(400).json({ message: `Subcategory not found: ${item}` });
+                }
+                resolvedSubs.push(cat._id);
+            }
+            novel.subcategories = resolvedSubs;
+        }
         if (pricingModel !== undefined) novel.pricingModel = pricingModel;
 
         await novel.save();
@@ -308,10 +400,12 @@ exports.getNovelById = async (req, res) => {
         // Populate author and chapters with their authors (only published chapters)
         const novel = await Novel.findById(novelId)
             .populate('author', 'username profilePicture email')
+            .populate('categories', 'name slug')
+            .populate('subcategories', 'name slug')
             .populate({
                 path: 'chapters',
                 match: { status: 'published' },
-                select: 'title chapterNumber createdAt viewCount coverImage' // Exclude content and author to make API lighter
+                select: 'title chapterNumber createdAt viewCount coverImage coinCost' // Exclude content and author to make API lighter
             });
 
         if (!novel) {

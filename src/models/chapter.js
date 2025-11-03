@@ -17,6 +17,10 @@ const ChapterSchema = new mongoose.Schema({
     type: String,
     required: false
   },
+  coinCost: {
+    type: Number,
+    default: 0
+  },
   novel: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Novel',

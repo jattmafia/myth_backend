@@ -32,10 +32,15 @@ const NovelSchema = new mongoose.Schema({
     required: true
   },
   // Categories/genres for the novel (e.g. romance, mystery)
-  categories: {
-    type: [String],
-    default: []
-  },
+  categories: [{
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Category'
+  }],
+  // Subcategories (child categories) stored separately for explicit mapping
+  subcategories: [{
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Category'
+  }],
   status: {
     type: String,
     enum: ['draft', 'published', 'ongoing'],
