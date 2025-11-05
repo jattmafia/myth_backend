@@ -99,7 +99,7 @@ exports.createNovel = async (req, res) => {
             description,
             hookupDescription,
             language,
-            coverImage: uploadResult.Location || uploadResult.Key || null,
+            coverImage: uploadResult.Key,
             author: user._id,
             categories: categoryIds,
             subcategories: subcategoryIds,
@@ -1947,7 +1947,7 @@ exports.getNovelsByCategory = async (req, res) => {
         const limit = Math.min(Math.max(parseInt(req.query.limit) || 10, 1), 50);
         const skip = (page - 1) * limit;
 
-        
+
 
         // Resolve category id (accept ObjectId or slug)
         const mongoose = require('mongoose');
@@ -1969,7 +1969,7 @@ exports.getNovelsByCategory = async (req, res) => {
             $or: [{ categories: category._id }, { subcategories: category._id }]
         };
 
-        
+
 
         const [novels, total] = await Promise.all([
             Novel.find(match)
@@ -1981,7 +1981,7 @@ exports.getNovelsByCategory = async (req, res) => {
             Novel.countDocuments(match)
         ]);
 
-        
+
 
         // Add isFavourite if user provided (optional)
         const userId = req.user?.id;
