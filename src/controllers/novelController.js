@@ -192,23 +192,37 @@ exports.getNovelsByUser = async (req, res) => {
     }
 };
 
-// Get discover novels (latest releases, most popular, recommended)
+// Get discover novels (latest releases, most popular, recommended, premium, free)
+// Query params: pricing=free|paid|all (default: all), premium=true (alias for paid)
+// Separate limit params: latestLimit=1-10, popularLimit=1-10, recommendedLimit=1-10, premiumLimit=1-10, freeLimit=1-10 (each default: 10, max 10)
 exports.getDiscoverNovels = async (req, res) => {
     try {
         const userId = req.user?.id;
-        const limit = parseInt(req.query.limit) || 10;
 
-        // Get latest releases (recently created novels) - only published/ongoing
-        const latestReleases = await Novel.find({ status: { $in: ['published', 'ongoing'] } })
+        // Parse individual limits for each section (default 10, max 10)
+        const latestLimit = Math.min(Math.max(parseInt(req.query.latestLimit) || 10, 1), 10);
+        const popularLimit = Math.min(Math.max(parseInt(req.query.popularLimit) || 10, 1), 10);
+        const recommendedLimit = Math.min(Math.max(parseInt(req.query.recommendedLimit) || 10, 1), 10);
+        const premiumLimit = Math.min(Math.max(parseInt(req.query.premiumLimit) || 10, 1), 10);
+        const freeLimit = Math.min(Math.max(parseInt(req.query.freeLimit) || 10, 1), 10);
+
+        // pricing filter: 'free', 'paid', or 'all'
+        let pricing = (req.query.pricing || req.query.premium === 'true' ? 'paid' : 'all').toString().toLowerCase();
+        if (!['free', 'paid', 'all'].includes(pricing)) pricing = 'all';
+
+        // base match for status and optional pricing
+        const baseMatch = { status: { $in: ['published', 'ongoing'] } };
+        if (pricing !== 'all') baseMatch.pricingModel = pricing;
+
+        // Get latest releases (recently created novels)
+        const latestReleases = await Novel.find(baseMatch)
             .select('title coverImage')
             .sort({ createdAt: -1 })
-            .limit(limit);
+            .limit(latestLimit);
 
-        // Get most popular novels (based on favorites count) - only published/ongoing
+        // Get most popular novels (based on favorites count)
         const mostPopular = await Novel.aggregate([
-            {
-                $match: { status: { $in: ['published', 'ongoing'] } }
-            },
+            { $match: baseMatch },
             {
                 $lookup: {
                     from: 'favorites',
@@ -222,49 +236,55 @@ exports.getDiscoverNovels = async (req, res) => {
                     favoritesCount: { $size: '$favorites' }
                 }
             },
-            {
-                $sort: { favoritesCount: -1 }
-            },
-            {
-                $limit: limit
-            },
-            {
-                $project: {
-                    title: 1,
-                    coverImage: 1
-                }
-            }
+            { $sort: { favoritesCount: -1 } },
+            { $limit: popularLimit },
+            { $project: { title: 1, coverImage: 1 } }
         ]);
 
-        // Get recommended novels (highest rated novels) - only published/ongoing
-        const recommended = await Novel.find({
-            averageRating: { $gte: 4.0 },
-            status: { $in: ['published', 'ongoing'] }
-        })
+        // Get recommended novels (highest rated novels)
+        const recommendedMatch = { ...baseMatch, averageRating: { $gte: 4.0 } };
+        const recommended = await Novel.find(recommendedMatch)
             .select('title coverImage')
             .sort({ averageRating: -1, totalReviews: -1 })
-            .limit(limit);
+            .limit(recommendedLimit);
 
-        // If user is logged in, add favorite status and user review info
+        // Get premium (paid) novels
+        const premiumMatch = { status: { $in: ['published', 'ongoing'] }, pricingModel: 'paid' };
+        const premium = await Novel.find(premiumMatch)
+            .select('title coverImage')
+            .sort({ createdAt: -1 })
+            .limit(premiumLimit);
+
+        // Get free novels
+        const freeMatch = { status: { $in: ['published', 'ongoing'] }, pricingModel: 'free' };
+        const free = await Novel.find(freeMatch)
+            .select('title coverImage')
+            .sort({ createdAt: -1 })
+            .limit(freeLimit);
+
+        // If user is logged in, add favorite status
         let favoritesMap = {};
-        let reviewsMap = {};
 
         if (userId) {
             // Get user favorites for all novels
             const allNovelIds = [
                 ...latestReleases.map(n => n._id),
                 ...mostPopular.map(n => n._id),
-                ...recommended.map(n => n._id)
-            ];
+                ...recommended.map(n => n._id),
+                ...premium.map(n => n._id),
+                ...free.map(n => n._id)
+            ].filter(Boolean);
 
-            const userFavorites = await Favorite.find({
-                user: userId,
-                novel: { $in: allNovelIds }
-            }).select('novel');
+            if (allNovelIds.length > 0) {
+                const userFavorites = await Favorite.find({
+                    user: userId,
+                    novel: { $in: allNovelIds }
+                }).select('novel');
 
-            userFavorites.forEach(fav => {
-                favoritesMap[fav.novel.toString()] = true;
-            });
+                userFavorites.forEach(fav => {
+                    favoritesMap[fav.novel.toString()] = true;
+                });
+            }
         }
 
         // Transform novels to add extra info
@@ -282,12 +302,182 @@ exports.getDiscoverNovels = async (req, res) => {
             data: {
                 latestReleases: transformNovels(latestReleases),
                 mostPopular: transformNovels(mostPopular),
-                recommended: transformNovels(recommended)
+                recommended: transformNovels(recommended),
+                premium: transformNovels(premium),
+                free: transformNovels(free)
+            },
+            meta: {
+                pricing,
+                limits: {
+                    latestLimit,
+                    popularLimit,
+                    recommendedLimit,
+                    premiumLimit,
+                    freeLimit
+                }
             }
         });
 
     } catch (error) {
         console.error('Error fetching discover novels:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Internal server error',
+            error: error.message
+        });
+    }
+};
+
+// Get paginated results for a specific discover section
+// Query params: section=latestReleases|mostPopular|recommended|premium|free (required)
+// page=1 (default), limit=1-50 (default: 10, max 50)
+// pricing=free|paid|all (filters for latestReleases, mostPopular, recommended only; default: all)
+exports.getDiscoverSection = async (req, res) => {
+    try {
+        const userId = req.user?.id;
+        const sectionInput = (req.query.section || '').toLowerCase();
+        const page = Math.max(parseInt(req.query.page) || 1, 1);
+        const limit = Math.min(Math.max(parseInt(req.query.limit) || 10, 1), 50);
+        const skip = (page - 1) * limit;
+
+        // Map lowercase input to camelCase section names
+        const sectionMap = {
+            'latestreleases': 'latestReleases',
+            'mostpopular': 'mostPopular',
+            'recommended': 'recommended',
+            'premium': 'premium',
+            'free': 'free'
+        };
+
+        const section = sectionMap[sectionInput];
+
+        // Validate section
+        if (!section) {
+            const validSections = Object.keys(sectionMap);
+            return res.status(400).json({
+                success: false,
+                message: `Invalid section. Must be one of: ${validSections.join(', ')}`
+            });
+        }
+
+        // pricing filter: 'free', 'paid', or 'all'
+        let pricing = (req.query.pricing || 'all').toString().toLowerCase();
+        if (!['free', 'paid', 'all'].includes(pricing)) pricing = 'all';
+
+        let query = { status: { $in: ['published', 'ongoing'] } };
+        let sortBy = { createdAt: -1 };
+        let usesAggregation = false;
+        let aggregationPipeline = null;
+
+        // Set query and sorting based on section
+        switch (section) {
+            case 'latestReleases':
+                if (pricing !== 'all') query.pricingModel = pricing;
+                sortBy = { createdAt: -1 };
+                break;
+
+            case 'mostPopular':
+                if (pricing !== 'all') query.pricingModel = pricing;
+                usesAggregation = true;
+                aggregationPipeline = [
+                    { $match: query },
+                    {
+                        $lookup: {
+                            from: 'favorites',
+                            localField: '_id',
+                            foreignField: 'novel',
+                            as: 'favorites'
+                        }
+                    },
+                    {
+                        $addFields: {
+                            favoritesCount: { $size: '$favorites' }
+                        }
+                    },
+                    { $sort: { favoritesCount: -1 } },
+                    { $skip: skip },
+                    { $limit: limit },
+                    { $project: { title: 1, coverImage: 1, favoritesCount: 1 } }
+                ];
+                break;
+
+            case 'recommended':
+                if (pricing !== 'all') query.pricingModel = pricing;
+                query.averageRating = { $gte: 4.0 };
+                sortBy = { averageRating: -1, totalReviews: -1 };
+                break;
+
+            case 'premium':
+                query.pricingModel = 'paid';
+                sortBy = { createdAt: -1 };
+                break;
+
+            case 'free':
+                query.pricingModel = 'free';
+                sortBy = { createdAt: -1 };
+                break;
+        }
+
+        // Fetch paginated results
+        let novels = [];
+        let totalCount = 0;
+
+        if (usesAggregation) {
+            novels = await Novel.aggregate(aggregationPipeline);
+            totalCount = await Novel.countDocuments(query);
+        } else {
+            // For other sections using find
+            totalCount = await Novel.countDocuments(query);
+            novels = await Novel.find(query)
+                .select('title coverImage')
+                .sort(sortBy)
+                .skip(skip)
+                .limit(limit);
+        }
+
+        // If user is logged in, add favorite status
+        let favoritesMap = {};
+
+        if (userId && novels.length > 0) {
+            const novelIds = novels.map(n => n._id);
+            const userFavorites = await Favorite.find({
+                user: userId,
+                novel: { $in: novelIds }
+            }).select('novel');
+
+            userFavorites.forEach(fav => {
+                favoritesMap[fav.novel.toString()] = true;
+            });
+        }
+
+        // Transform novels to add extra info
+        const transformedNovels = novels.map(novel => {
+            const novelObj = novel.toObject ? novel.toObject() : novel;
+            novelObj.isFavourite = !!favoritesMap[novelObj._id.toString()];
+            return novelObj;
+        });
+
+        const totalPages = Math.ceil(totalCount / limit);
+
+        res.status(200).json({
+            success: true,
+            data: transformedNovels,
+            pagination: {
+                currentPage: page,
+                totalPages,
+                totalItems: totalCount,
+                itemsPerPage: limit,
+                hasNextPage: page < totalPages,
+                hasPrevPage: page > 1
+            },
+            meta: {
+                section,
+                pricing: (section === 'premium' || section === 'free') ? null : pricing
+            }
+        });
+
+    } catch (error) {
+        console.error('Error fetching discover section:', error);
         res.status(500).json({
             success: false,
             message: 'Internal server error',
