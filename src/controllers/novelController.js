@@ -66,39 +66,41 @@ exports.createNovel = async (req, res) => {
                     }
                 }
                 if (!cat) {
-                    return res.status(400).json({ success: false, message: `Category not found: ${item}` });
+                    return res.status(400).json({ message: `Category not found: ${item}` });
                 }
                 categoryIds.push(cat._id);
             }
         }
-        // Resolve subcategories (accept slugs or ids) and store ObjectId refs
+
+        // Resolve subcategories similarly
         let subcategoryIds = [];
         if (Array.isArray(subcategories) && subcategories.length > 0) {
             for (const item of subcategories) {
-                let cat = null;
+                let sub = null;
                 if (item && typeof item === 'string') {
                     if (require('mongoose').Types.ObjectId.isValid(item)) {
-                        cat = await Category.findById(item);
+                        sub = await Category.findById(item);
                     }
-                    if (!cat) {
+                    if (!sub) {
                         const slug = item.toString().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
-                        cat = await Category.findOne({ slug });
+                        sub = await Category.findOne({ slug });
                     }
                 }
-                if (!cat) {
-                    return res.status(400).json({ success: false, message: `Subcategory not found: ${item}` });
+                if (!sub) {
+                    return res.status(400).json({ message: `Subcategory not found: ${item}` });
                 }
-                subcategoryIds.push(cat._id);
+                subcategoryIds.push(sub._id);
             }
         }
 
+        // Create novel document
         const newNovel = new Novel({
             title,
             description,
-            coverImage: uploadResult.Key,
-            author: req.user.id,
             hookupDescription,
             language,
+            coverImage: uploadResult.Location || uploadResult.Key || null,
+            author: user._id,
             categories: categoryIds,
             subcategories: subcategoryIds,
             pricingModel: pricing
@@ -1809,5 +1811,210 @@ exports.toggleBookshelf = async (req, res) => {
             message: 'Internal server error',
             error: error.message
         });
+    }
+};
+
+// Search novels and authors by same search text (exclude draft novels)
+// Query params:
+// q (required) - search text
+// page, limit - pagination for novels (default limit 10, max 50)
+// authorLimit - number of authors to return (default 5, max 20)
+exports.search = async (req, res) => {
+    try {
+        const q = (req.query.q || '').toString().trim();
+        if (!q) return res.status(400).json({ success: false, message: 'q (search text) is required' });
+
+        // novels pagination
+        const page = Math.max(parseInt(req.query.page) || 1, 1);
+        const limit = Math.min(Math.max(parseInt(req.query.limit) || 10, 1), 50);
+        const skip = (page - 1) * limit;
+
+        // authors limit
+        const authorLimit = Math.min(Math.max(parseInt(req.query.authorLimit) || 5, 1), 20);
+
+        // Prefer using MongoDB text search (requires text indexes on models). Fall back to regex if text search fails.
+        const User = require('../models/user');
+
+        let novels = [];
+        let totalNovels = 0;
+        let authors = [];
+
+        try {
+            // Text search for novels (exclude drafts)
+            const novelTextQuery = { $text: { $search: q }, status: { $in: ['published', 'ongoing'] } };
+
+            const novelsPromise = Novel.find(novelTextQuery, { score: { $meta: 'textScore' } })
+                .select('title coverImage author hookupDescription pricingModel score')
+                .populate('author', 'username profilePicture')
+                .sort({ score: { $meta: 'textScore' }, createdAt: -1 })
+                .skip(skip)
+                .limit(limit);
+
+            const novelsCountPromise = Novel.countDocuments(novelTextQuery);
+
+            // Text search for authors
+            const authorsPromise = User.find({ $text: { $search: q } }, { score: { $meta: 'textScore' } })
+                .select('username profilePicture fullName score')
+                .sort({ score: { $meta: 'textScore' } })
+                .limit(authorLimit);
+
+            [novels, totalNovels, authors] = await Promise.all([novelsPromise, novelsCountPromise, authorsPromise]);
+        } catch (textErr) {
+            // fallback to regex search if text search not available
+            const escapeRegex = (s) => s.replace(/[.*+?^${}()|[\\]\\]/g, '\\$&');
+            const regex = new RegExp(escapeRegex(q), 'i');
+
+            const novelQuery = {
+                status: { $in: ['published', 'ongoing'] },
+                $or: [
+                    { title: regex },
+                    { description: regex },
+                    { hookupDescription: regex }
+                ]
+            };
+
+            const novelsPromise = Novel.find(novelQuery)
+                .select('title coverImage author hookupDescription pricingModel')
+                .populate('author', 'username profilePicture')
+                .sort({ createdAt: -1 })
+                .skip(skip)
+                .limit(limit);
+
+            const novelsCountPromise = Novel.countDocuments(novelQuery);
+
+            const authorQuery = {
+                $or: [
+                    { username: regex },
+                    { fullName: regex }
+                ]
+            };
+            const authorsPromise = User.find(authorQuery)
+                .select('username profilePicture fullName')
+                .limit(authorLimit);
+
+            [novels, totalNovels, authors] = await Promise.all([novelsPromise, novelsCountPromise, authorsPromise]);
+        }
+
+        // mark if current user has favourited novels (if authenticated)
+        const favoritesMap = {};
+        const userId = req.user?.id;
+        if (userId && novels.length > 0) {
+            const novelIds = novels.map(n => n._id);
+            const userFavorites = await Favorite.find({ user: userId, novel: { $in: novelIds } }).select('novel');
+            userFavorites.forEach(f => { favoritesMap[f.novel.toString()] = true; });
+        }
+
+        const novelsWithExtras = novels.map(n => {
+            const obj = n.toObject ? n.toObject() : n;
+            obj.isFavourite = !!favoritesMap[obj._id.toString()];
+            return obj;
+        });
+
+        const totalPages = Math.ceil(totalNovels / limit);
+
+        res.status(200).json({
+            success: true,
+            data: {
+                novels: novelsWithExtras,
+                authors
+            },
+            pagination: {
+                currentPage: page,
+                totalPages,
+                totalItems: totalNovels,
+                itemsPerPage: limit
+            }
+        });
+
+    } catch (error) {
+        console.error('Error in search:', error);
+        res.status(500).json({ success: false, message: 'Internal server error', error: error.message });
+    }
+};
+
+// Get novels by category (category id or slug) with pagination
+// Query params:
+// - category (string, required) - category id or slug
+// - page (int, optional) - default 1
+// - limit (int, optional) - default 10, max 50
+// Auth: optional (if provided, `isFavourite` will be set on returned novels)
+exports.getNovelsByCategory = async (req, res) => {
+    try {
+        const categoryInput = (req.query.category || '').toString().trim();
+        if (!categoryInput) return res.status(400).json({ success: false, message: 'category is required (id or slug)' });
+
+        const page = Math.max(parseInt(req.query.page) || 1, 1);
+        const limit = Math.min(Math.max(parseInt(req.query.limit) || 10, 1), 50);
+        const skip = (page - 1) * limit;
+
+        
+
+        // Resolve category id (accept ObjectId or slug)
+        const mongoose = require('mongoose');
+        let category = null;
+        if (mongoose.Types.ObjectId.isValid(categoryInput)) {
+            category = await Category.findById(categoryInput);
+        }
+        if (!category) {
+            const slug = categoryInput.toString().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+            category = await Category.findOne({ slug });
+        }
+        if (!category) {
+            return res.status(404).json({ success: false, message: 'Category not found' });
+        }
+
+        // Only show published/ongoing novels, and those that list the category in categories or subcategories
+        const match = {
+            status: { $in: ['published', 'ongoing'] },
+            $or: [{ categories: category._id }, { subcategories: category._id }]
+        };
+
+        
+
+        const [novels, total] = await Promise.all([
+            Novel.find(match)
+                .select('title coverImage author hookupDescription pricingModel totalViews averageRating totalReviews createdAt')
+                .populate('author', 'username profilePicture')
+                .sort({ createdAt: -1 })
+                .skip(skip)
+                .limit(limit),
+            Novel.countDocuments(match)
+        ]);
+
+        
+
+        // Add isFavourite if user provided (optional)
+        const userId = req.user?.id;
+        const favoritesMap = {};
+        if (userId && novels.length > 0) {
+            const novelIds = novels.map(n => n._id);
+            const userFavorites = await Favorite.find({ user: userId, novel: { $in: novelIds } }).select('novel');
+            userFavorites.forEach(f => { favoritesMap[f.novel.toString()] = true; });
+        }
+
+        const novelsWithExtras = novels.map(n => {
+            const obj = n.toObject ? n.toObject() : n;
+            obj.isFavourite = !!favoritesMap[obj._id.toString()];
+            return obj;
+        });
+
+        const totalPages = Math.ceil(total / limit);
+
+        res.status(200).json({
+            success: true,
+            data: {
+                category: { _id: category._id, name: category.name, slug: category.slug },
+                novels: novelsWithExtras
+            },
+            pagination: {
+                currentPage: page,
+                totalPages,
+                totalItems: total,
+                itemsPerPage: limit
+            }
+        });
+    } catch (error) {
+        console.error('Error in getNovelsByCategory:', error, error.stack);
+        res.status(500).json({ success: false, message: 'Internal server error', error: error.message });
     }
 };

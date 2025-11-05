@@ -80,4 +80,7 @@ const NovelSchema = new mongoose.Schema({
   }
 });
 
+// Text index for search (title highest weight, hookupDescription medium, description low)
+NovelSchema.index({ title: 'text', hookupDescription: 'text', description: 'text' }, { weights: { title: 10, hookupDescription: 5, description: 1 } });
+
 module.exports = mongoose.model('Novel', NovelSchema);

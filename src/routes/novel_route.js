@@ -12,6 +12,8 @@ router.put('/updateNovel/:novelId', verifyToken, novel.updateNovel);
 router.get('/getNovelById/:novelId', verifyToken, novel.getNovelById);
 router.get('/discover', verifyToken, novel.getDiscoverNovels);
 router.get('/discover/section', verifyToken, novel.getDiscoverSection);
+router.get('/search', novel.search);
+router.get('/by-category', novel.getNovelsByCategory);
 
 // Reading progress routes
 router.get('/currently-reading', verifyToken, novel.getCurrentlyReading);

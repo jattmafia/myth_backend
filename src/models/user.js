@@ -90,6 +90,9 @@ const UserSchema = new mongoose.Schema({
 
 });
 
+// Text index for user search (username higher weight)
+UserSchema.index({ username: 'text', fullName: 'text' }, { weights: { username: 10, fullName: 5 } });
+
 // Password hashing before saving to DB
 UserSchema.pre('save', async function (next) {
   if (!this.isModified('password')) {
