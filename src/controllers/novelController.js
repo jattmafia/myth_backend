@@ -375,7 +375,15 @@ exports.getDiscoverSection = async (req, res) => {
         switch (section) {
             case 'latestReleases':
                 if (pricing !== 'all') query.pricingModel = pricing;
-                sortBy = { createdAt: -1 };
+                usesAggregation = true;
+                aggregationPipeline = [
+                    { $match: query },
+                    { $group: { _id: '$_id', title: { $first: '$title' }, coverImage: { $first: '$coverImage' }, createdAt: { $first: '$createdAt' } } },
+                    { $sort: { createdAt: -1 } },
+                    { $skip: skip },
+                    { $limit: limit },
+                    { $project: { _id: 1, title: 1, coverImage: 1 } }
+                ];
                 break;
 
             case 'mostPopular':
@@ -396,10 +404,11 @@ exports.getDiscoverSection = async (req, res) => {
                             favoritesCount: { $size: '$favorites' }
                         }
                     },
+                    { $group: { _id: '$_id', title: { $first: '$title' }, coverImage: { $first: '$coverImage' }, favoritesCount: { $first: '$favoritesCount' } } },
                     { $sort: { favoritesCount: -1 } },
                     { $skip: skip },
                     { $limit: limit },
-                    { $project: { title: 1, coverImage: 1, favoritesCount: 1 } }
+                    { $project: { _id: 1, title: 1, coverImage: 1, favoritesCount: 1 } }
                 ];
                 break;
 
