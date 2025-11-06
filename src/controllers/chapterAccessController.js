@@ -828,10 +828,23 @@ exports.recordAdWatch = async (req, res) => {
 
     // Record writer earning for ad watch ONLY if:
     // 1. Novel is paid
-    // 2. Chapter is provided and chapter is 6+ (not 1-5)
-    if (chapter && novel.pricingModel === 'paid' && chapter.chapterNumber > 5) {
-      const writerEarningController = require('./writerEarningController');
-      await writerEarningController.recordAdEarning(novelId, chapter.author._id, chapterId, adType || 'ad');
+    // 2. Chapter is provided and either:
+    //    - chapter is 6+ (paid chapter) OR
+    //    - chapter is sample (1-5) but has >1000 views
+    if (chapter && novel.pricingModel === 'paid') {
+      try {
+        const isSample = chapter.chapterNumber <= 5;
+        const views = chapter.viewCount || 0;
+        const shouldRecord = !isSample || (isSample && views > 1000);
+        if (shouldRecord) {
+          const writerEarningController = require('./writerEarningController');
+          await writerEarningController.recordAdEarning(novelId, chapter.author._id, chapterId, adType || 'ad');
+        } else {
+          console.log(`[earnings] skipped ad earning for chapter ${chapterId} (sample, views=${views})`);
+        }
+      } catch (e) {
+        console.error('Error recording ad writer earning:', e && e.message);
+      }
     }
 
     res.status(200).json({
