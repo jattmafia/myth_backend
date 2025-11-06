@@ -485,13 +485,26 @@ exports.unlockByCoins = async (req, res) => {
     });
 
     // Record writer earning (70% of coins)
+    // New rule: for sample chapters (1-5) only record earnings if the chapter has >1000 views
+    // For paid chapters (6+), always record earnings.
     const writerEarningController = require('./writerEarningController');
-    await writerEarningController.recordCoinEarning(
-      chapter.novel._id,
-      chapter.author._id,
-      chapterId,
-      coinPrice
-    );
+    try {
+      const isSample = chapter.chapterNumber <= 5;
+      const views = chapter.viewCount || 0;
+      if (!isSample || (isSample && views > 1000)) {
+        await writerEarningController.recordCoinEarning(
+          chapter.novel._id,
+          chapter.author._id,
+          chapterId,
+          coinPrice
+        );
+      } else {
+        // Skip recording writer earning for low-traffic sample chapters
+        console.log(`[earnings] skipped writer earning for chapter ${chapterId} (sample, views=${views})`);
+      }
+    } catch (e) {
+      console.error('Error recording writer earning:', e && e.message);
+    }
 
     res.status(200).json({
       success: true,
