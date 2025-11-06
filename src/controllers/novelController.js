@@ -663,23 +663,30 @@ exports.getNovelById = async (req, res) => {
                 lastReadAt: null
             };
 
-            // Add chapter lock status based on pricing model
+            // Add chapter lock status and unlockedMethod based on pricing model
+            // unlockedMethod values: 'free' (free novel or sample chapters), 'purchased', 'coin', 'ad', or null
+            chapterObj.unlockedMethod = null;
             if (novel.pricingModel === 'free') {
                 // All chapters are accessible in free novels
                 chapterObj.isLocked = false;
+                chapterObj.unlockedMethod = 'free';
             } else {
                 // Paid novel logic
                 if (chapter.chapterNumber <= 5) {
-                    // Chapters 1-5 are free
+                    // Chapters 1-5 are free samples
                     chapterObj.isLocked = false;
+                    chapterObj.unlockedMethod = 'free';
                 } else {
                     // Chapters 6+ require purchase/unlock
-                    if (userId && (userAccessMap[chapterId] === 'purchased' || userAccessMap[chapterId] === 'coin' || userAccessMap[chapterId] === 'ad')) {
+                    const accessType = userId ? userAccessMap[chapterId] : null;
+                    if (accessType === 'purchased' || accessType === 'coin' || accessType === 'ad') {
                         // User has unlocked this chapter (via purchase, coin, or ad)
                         chapterObj.isLocked = false;
+                        chapterObj.unlockedMethod = accessType;
                     } else {
                         // Either not logged in or not unlocked
                         chapterObj.isLocked = true;
+                        chapterObj.unlockedMethod = null;
                     }
                 }
             }
