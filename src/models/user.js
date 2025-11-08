@@ -87,6 +87,36 @@ const UserSchema = new mongoose.Schema({
     default: 0,
     min: 0
   },
+  // Writer subscription reference
+  writerSubscription: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'WriterSubscription',
+    default: null,
+  },
+  // Total earnings from writing (in paisa/cents)
+  totalEarnings: {
+    type: Number,
+    default: 0,
+    min: 0,
+  },
+  // Preferred payment method for earnings
+  preferredPaymentMethod: {
+    type: String,
+    enum: ['bank_transfer', 'wallet', 'upi'],
+    default: null,
+  },
+  // Bank account details for earnings (encrypted in production)
+  bankDetails: {
+    accountNumber: String,
+    accountHolderName: String,
+    ifscCode: String,
+    bankName: String,
+  },
+  // Last earnings withdrawal date
+  lastEarningsWithdrawalDate: {
+    type: Date,
+    default: null,
+  },
 
 });
 

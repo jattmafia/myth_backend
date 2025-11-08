@@ -83,9 +83,10 @@ exports.checkMonetizationEligibility = async (req, res) => {
 // Record coin earning when reader unlocks chapter via coin
 exports.recordCoinEarning = async (novelId, writerId, chapterId, coinPrice) => {
   try {
-    // Check monetization eligibility before recording earning
     const Novel = require('../models/novel');
     const Chapter = require('../models/chapter');
+    const WriterSubscription = require('../models/writerSubscription');
+    const subscriptionUtils = require('../utils/subscriptionUtils');
 
     const novel = await Novel.findById(novelId);
     const chapter = await Chapter.findById(chapterId);
@@ -95,44 +96,86 @@ exports.recordCoinEarning = async (novelId, writerId, chapterId, coinPrice) => {
       return;
     }
 
-    // Only record if: novel is paid, chapter is 6+, and has 1K views on chapters 1-5
-    if (novel.pricingModel !== 'paid' || chapter.chapterNumber <= 5) {
+    // Only record if novel is paid
+    if (novel.pricingModel !== 'paid') {
       return;
     }
 
-    // Check if writer meets monetization criteria (1K views on chapters 1-5)
-    const freeChaptersViews = await Chapter.aggregate([
-      {
-        $match: {
-          novel: novel._id,
-          chapterNumber: { $gte: 1, $lte: 5 }
+    // Check writer's subscription status
+    const subscription = await WriterSubscription.findOne({ writer: writerId })
+      .populate('currentPlan');
+
+    const hasSubscription = subscriptionUtils.isSubscriptionActive(subscription);
+    const platformFee = hasSubscription
+      ? subscription.currentPlan?.platformFeePercentage || 10
+      : 30; // 30% for non-subscribed
+    const writerPercentage = 100 - platformFee;
+
+    // For subscribed writers: no view requirement on chapters 1-5
+    // For non-subscribed: need 1K views on chapters 1-5
+    let viewsRequirementMet = false;
+    let totalFreeViews = 0;
+
+    if (hasSubscription) {
+      // Subscribed: no view requirement, earn directly from chapter 6+
+      viewsRequirementMet = chapter.chapterNumber >= 6 ? true : false;
+    } else {
+      // Non-subscribed: check 1K view requirement on chapters 1-5
+      const freeChaptersViews = await Chapter.aggregate([
+        {
+          $match: {
+            novel: novel._id,
+            chapterNumber: { $gte: 1, $lte: 5 }
+          }
+        },
+        {
+          $group: {
+            _id: null,
+            totalViews: { $sum: '$viewCount' }
+          }
         }
-      },
-      {
-        $group: {
-          _id: null,
-          totalViews: { $sum: '$viewCount' }
-        }
+      ]);
+
+      totalFreeViews = freeChaptersViews[0]?.totalViews || 0;
+
+      // Only chapters 6+ can have earnings, and only if 1K+ views on 1-5
+      if (chapter.chapterNumber >= 6 && totalFreeViews >= 1000) {
+        viewsRequirementMet = true;
       }
-    ]);
+    }
 
-    const totalFreeViews = freeChaptersViews[0]?.totalViews || 0;
-
-    // Only record earning if writer has 1K+ views on free chapters
-    if (totalFreeViews < 1000) {
-      console.log(`Writer ${writerId} does not meet monetization eligibility (views: ${totalFreeViews}/1000)`);
+    // Only record earning if conditions are met
+    if (!viewsRequirementMet) {
+      console.log(`Writer ${writerId} earning not recorded. Subscription: ${hasSubscription}, Views: ${totalFreeViews}, Chapter: ${chapter.chapterNumber}`);
       return;
     }
 
-    const writerCut = Math.round(coinPrice * 0.7); // 70% to writer
+    // Calculate writer earning
+    const writerEarning = Math.round(coinPrice * (writerPercentage / 100));
+
+    // Coins required to unlock (usually 80% of coin price)
+    const coinsRequiredToUnlock = Math.round(coinPrice * 0.8);
 
     await WriterEarning.findOneAndUpdate(
       { writer: writerId, novel: novelId, chapter: chapterId, earningType: 'coin' },
       {
-        $inc: { amount: writerCut, count: 1 }
+        $inc: { amount: writerEarning, count: 1 },
+        $set: {
+          hasSubscription,
+          subscriptionId: subscription?._id || null,
+          platformFeePercentage: platformFee,
+          writerPercentageEarned: writerPercentage,
+          viewsRequirementMet,
+          totalViewsOnFreeChapters: totalFreeViews,
+          coinPrice,
+          coinsRequiredToUnlock,
+          chapterNumber: chapter.chapterNumber
+        }
       },
       { upsert: true, new: true }
     );
+
+    console.log(`✅ Coin earning recorded: Writer ${writerId}, Amount: ₹${writerEarning}, Platform Fee: ${platformFee}%, Subscription: ${hasSubscription}`);
   } catch (error) {
     console.error('Error recording coin earning:', error);
   }
@@ -141,9 +184,10 @@ exports.recordCoinEarning = async (novelId, writerId, chapterId, coinPrice) => {
 // Record ad earning when reader unlocks chapter via ad
 exports.recordAdEarning = async (novelId, writerId, chapterId, adType = 'ad') => {
   try {
-    // Check monetization eligibility before recording earning
     const Novel = require('../models/novel');
     const Chapter = require('../models/chapter');
+    const WriterSubscription = require('../models/writerSubscription');
+    const subscriptionUtils = require('../utils/subscriptionUtils');
 
     const novel = await Novel.findById(novelId);
     const chapter = await Chapter.findById(chapterId);
@@ -153,43 +197,79 @@ exports.recordAdEarning = async (novelId, writerId, chapterId, adType = 'ad') =>
       return;
     }
 
-    // Only record if: novel is paid, chapter is 6+, and has 1K views on chapters 1-5
-    if (novel.pricingModel !== 'paid' || chapter.chapterNumber <= 5) {
+    // Only record if novel is paid
+    if (novel.pricingModel !== 'paid') {
       return;
     }
 
-    // Check if writer meets monetization criteria (1K views on chapters 1-5)
-    const freeChaptersViews = await Chapter.aggregate([
-      {
-        $match: {
-          novel: novel._id,
-          chapterNumber: { $gte: 1, $lte: 5 }
+    // Check writer's subscription status
+    const subscription = await WriterSubscription.findOne({ writer: writerId })
+      .populate('currentPlan');
+
+    const hasSubscription = subscriptionUtils.isSubscriptionActive(subscription);
+    const platformFee = hasSubscription
+      ? subscription.currentPlan?.platformFeePercentage || 10
+      : 30; // 30% for non-subscribed
+    const writerPercentage = 100 - platformFee;
+
+    // For subscribed writers: no view requirement on chapters 1-5
+    // For non-subscribed: need 1K views on chapters 1-5
+    let viewsRequirementMet = false;
+    let totalFreeViews = 0;
+
+    if (hasSubscription) {
+      // Subscribed: no view requirement, earn directly from chapter 6+
+      viewsRequirementMet = chapter.chapterNumber >= 6 ? true : false;
+    } else {
+      // Non-subscribed: check 1K view requirement on chapters 1-5
+      const freeChaptersViews = await Chapter.aggregate([
+        {
+          $match: {
+            novel: novel._id,
+            chapterNumber: { $gte: 1, $lte: 5 }
+          }
+        },
+        {
+          $group: {
+            _id: null,
+            totalViews: { $sum: '$viewCount' }
+          }
         }
-      },
-      {
-        $group: {
-          _id: null,
-          totalViews: { $sum: '$viewCount' }
-        }
+      ]);
+
+      totalFreeViews = freeChaptersViews[0]?.totalViews || 0;
+
+      // Only chapters 6+ can have earnings, and only if 1K+ views on 1-5
+      if (chapter.chapterNumber >= 6 && totalFreeViews >= 1000) {
+        viewsRequirementMet = true;
       }
-    ]);
+    }
 
-    const totalFreeViews = freeChaptersViews[0]?.totalViews || 0;
-
-    // Only record earning if writer has 1K+ views on free chapters
-    if (totalFreeViews < 1000) {
-      console.log(`Writer ${writerId} does not meet monetization eligibility (views: ${totalFreeViews}/1000)`);
+    // Only record earning if conditions are met
+    if (!viewsRequirementMet) {
+      console.log(`Writer ${writerId} ad earning not recorded. Subscription: ${hasSubscription}, Views: ${totalFreeViews}, Chapter: ${chapter.chapterNumber}`);
       return;
     }
 
-    // For now, we'll just increment count. Actual amount will be calculated based on eCPM rate
+    // For ad earnings: just increment count. Amount calculated based on eCPM rate
     await WriterEarning.findOneAndUpdate(
       { writer: writerId, novel: novelId, chapter: chapterId, earningType: adType },
       {
-        $inc: { count: 1 }
+        $inc: { count: 1 },
+        $set: {
+          hasSubscription,
+          subscriptionId: subscription?._id || null,
+          platformFeePercentage: platformFee,
+          writerPercentageEarned: writerPercentage,
+          viewsRequirementMet,
+          totalViewsOnFreeChapters: totalFreeViews,
+          chapterNumber: chapter.chapterNumber
+        }
       },
       { upsert: true, new: true }
     );
+
+    console.log(`✅ Ad earning recorded: Writer ${writerId}, Platform Fee: ${platformFee}%, Subscription: ${hasSubscription}`);
   } catch (error) {
     console.error('Error recording ad earning:', error);
   }
@@ -203,7 +283,8 @@ exports.getWriterEarnings = async (req, res) => {
     // Get all earnings
     const earnings = await WriterEarning.find({ writer: userId })
       .populate('novel', 'title')
-      .populate('chapter', 'chapterNumber title');
+      .populate('chapter', 'chapterNumber title')
+      .populate('subscriptionId', 'status currentPlan');
 
     // Group by earning type
     let totalByType = {
@@ -249,6 +330,14 @@ exports.getWriterEarnings = async (req, res) => {
           earningType: e.earningType,
           amount: e.amount,
           count: e.count,
+          // NEW FIELDS
+          hasSubscription: e.hasSubscription,
+          platformFeePercentage: e.platformFeePercentage,
+          writerPercentageEarned: e.writerPercentageEarned,
+          viewsRequirementMet: e.viewsRequirementMet,
+          totalViewsOnFreeChapters: e.totalViewsOnFreeChapters,
+          coinPrice: e.coinPrice,
+          coinsRequiredToUnlock: e.coinsRequiredToUnlock,
           createdAt: e.createdAt
         }))
       }

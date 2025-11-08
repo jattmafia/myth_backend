@@ -20,7 +20,7 @@ const ChapterAccessSchema = new mongoose.Schema({
   // 'purchased' (for chapters 6+ in paid novels)
   accessType: {
     type: String,
-    enum: ['free', 'purchased'],
+    enum: ['free', 'purchased','ad'],
     default: 'free'
   },
   accessedAt: {
