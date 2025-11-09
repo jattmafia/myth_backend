@@ -68,6 +68,8 @@ exports.checkChapterAccess = async (req, res) => {
       });
     }
 
+
+
     // Chapters 6+ are locked for paid novels
     if (!userId) {
       return res.status(200).json({
@@ -534,6 +536,7 @@ exports.unlockByAds = async (req, res) => {
   try {
     const { chapterId } = req.params;
     const userId = req.user.id;
+    console.debug('[unlockByAds] called', { chapterId, userId });
 
     // Fetch chapter with novel details
     const chapter = await Chapter.findById(chapterId).populate('novel', 'pricingModel');
@@ -544,6 +547,8 @@ exports.unlockByAds = async (req, res) => {
         message: 'Chapter not found'
       });
     }
+
+    console.debug('[unlockByAds] fetched chapter', { chapterId, chapter: chapter ? { id: chapter._id, chapterNumber: chapter.chapterNumber, novel: chapter.novel?._id, pricingModel: chapter.novel?.pricingModel, viewCount: chapter.viewCount } : null });
 
     const novel = chapter.novel;
 
@@ -564,10 +569,8 @@ exports.unlockByAds = async (req, res) => {
     }
 
     // Check if already unlocked
-    const existingAccess = await ChapterAccess.findOne({
-      user: userId,
-      chapter: chapterId
-    });
+    const existingAccess = await ChapterAccess.findOne({ user: userId, chapter: chapterId });
+    console.debug('[unlockByAds] existingAccess', { existingAccess });
 
     if (existingAccess && (existingAccess.accessType === 'purchased' || existingAccess.accessType === 'coin' || existingAccess.accessType === 'ad')) {
       return res.status(400).json({
@@ -583,11 +586,8 @@ exports.unlockByAds = async (req, res) => {
     const tomorrow = new Date(today);
     tomorrow.setDate(tomorrow.getDate() + 1);
 
-    const adCountToday = await AdUnlockLog.countDocuments({
-      user: userId,
-      novel: chapter.novel._id,
-      unlockedAt: { $gte: today, $lt: tomorrow }
-    });
+    const adCountToday = await AdUnlockLog.countDocuments({ user: userId, novel: chapter.novel._id, unlockedAt: { $gte: today, $lt: tomorrow } });
+    console.debug('[unlockByAds] adCountToday', { userId, novelId: chapter.novel._id, adCountToday });
 
     const dailyLimit = 5;
     if (adCountToday >= dailyLimit) {
@@ -599,53 +599,41 @@ exports.unlockByAds = async (req, res) => {
     }
 
     // Create access record
-    await ChapterAccess.findOneAndUpdate(
+    const access = await ChapterAccess.findOneAndUpdate(
       { user: userId, chapter: chapterId },
-      {
-        user: userId,
-        chapter: chapterId,
-        novel: chapter.novel._id,
-        accessType: 'ad',
-        accessedAt: new Date()
-      },
+      { user: userId, chapter: chapterId, novel: chapter.novel._id, accessType: 'ad', accessedAt: new Date() },
       { upsert: true, new: true }
     );
+    console.debug('[unlockByAds] ChapterAccess upserted for chapter', { chapterId, userId, accessId: access && access._id });
 
     // Record in ad unlock log
-    await AdUnlockLog.create({
-      user: userId,
-      novel: chapter.novel._id,
-      chapter: chapterId
-    });
+    const adLog = await AdUnlockLog.create({ user: userId, novel: chapter.novel._id, chapter: chapterId });
+    console.debug('[unlockByAds] AdUnlockLog created', { adLogId: adLog && adLog._id });
 
     // Record in unlock history
     const UnlockHistory = require('../models/unlockHistory');
-    await UnlockHistory.create({
-      user: userId,
-      chapter: chapterId,
-      novel: chapter.novel._id,
-      unlockMethod: 'ad'
-    });
+    const unlockRecord = await UnlockHistory.create({ user: userId, chapter: chapterId, novel: chapter.novel._id, unlockMethod: 'ad' });
+    console.debug('[unlockByAds] UnlockHistory created', { unlockRecordId: unlockRecord && unlockRecord._id });
 
     // Record writer earning for ad unlock
-    const writerEarningController = require('./writerEarningController');
-    await writerEarningController.recordAdEarning(
-      chapter.novel._id,
-      chapter.author._id,
-      chapterId
-    );
+    try {
+      const writerEarningController = require('./writerEarningController');
+      console.debug('[unlockByAds] calling recordAdEarning', { novelId: chapter.novel._id, authorId: chapter.author._id, chapterId });
+      await writerEarningController.recordAdEarning(chapter.novel._id, chapter.author._id, chapterId);
+      console.debug('[unlockByAds] recordAdEarning completed');
+    } catch (err) {
+      console.error('[unlockByAds] recordAdEarning failed', err && err.message);
+    }
 
-    res.status(200).json({
-      success: true,
-      message: 'Chapter unlocked successfully by watching ads',
-      data: {
-        chapterId,
-        novelId: novel._id,
-        chapterNumber: chapter.chapterNumber,
-        remainingAdUnlocksToday: dailyLimit - adCountToday - 1,
-        unlockedAt: new Date()
-      }
-    });
+    const responsePayload = {
+      chapterId,
+      novelId: novel._id,
+      chapterNumber: chapter.chapterNumber,
+      remainingAdUnlocksToday: dailyLimit - adCountToday - 1,
+      unlockedAt: new Date()
+    };
+    console.debug('[unlockByAds] response prepared', responsePayload);
+    res.status(200).json({ success: true, message: 'Chapter unlocked successfully by watching ads', data: responsePayload });
 
   } catch (error) {
     console.error('Error unlocking chapter by ads:', error);
@@ -810,51 +798,99 @@ exports.recordAdWatch = async (req, res) => {
       });
     }
 
-    // Record the ad watch
-    await AdUnlockLog.create({
-      user: userId,
-      novel: novelId,
-      chapter: chapterId
-    });
+    // If no chapterId is provided, just record the ad watch (novel-level tracking)
+    if (!chapterId) {
+      const adLog = await AdUnlockLog.create({ user: userId, novel: novelId, chapter: null });
+      const UnlockHistory = require('../models/unlockHistory');
+      const unlockHist = await UnlockHistory.create({ user: userId, chapter: null, novel: novelId, unlockMethod: 'ad' });
+      console.debug('[recordAdWatch] novel-level ad recorded', { adLogId: adLog && adLog._id, unlockHistoryId: unlockHist && unlockHist._id });
 
-    // Record in unlock history
+      return res.status(200).json({
+        success: true,
+        message: 'Ad watch recorded (novel-level)',
+        data: {
+          novelId,
+          chapterId: null,
+          usedAdUnlocksToday: adCountToday + 1,
+          remainingAdUnlocksToday: Math.max(0, dailyLimit - adCountToday - 1),
+          recordedAt: new Date()
+        }
+      });
+    }
+
+    // Now perform unlock behavior for the chapter (mirror unlockByAds)
+    // Re-check novel pricing and sample chapter rule
+    if (novel.pricingModel === 'free') {
+      return res.status(400).json({ success: false, message: 'This chapter is in a free novel and cannot be unlocked' });
+    }
+    if (chapter && chapter.chapterNumber <= 5) {
+      return res.status(400).json({ success: false, message: 'Chapters 1-5 are free and do not require ads' });
+    }
+
+    // Avoid duplicate unlocks: if user already has access, just record the ad watch and return
+    const existingAccess = await ChapterAccess.findOne({ user: userId, chapter: chapterId });
+    console.debug('[recordAdWatch] existingAccess', { existingAccess });
+    if (existingAccess && (existingAccess.accessType === 'purchased' || existingAccess.accessType === 'coin' || existingAccess.accessType === 'ad')) {
+      // Record the ad watch and history, but do not change access
+      const adLog = await AdUnlockLog.create({ user: userId, novel: novelId, chapter: chapterId });
+      const UnlockHistory = require('../models/unlockHistory');
+      const unlockHist = await UnlockHistory.create({ user: userId, chapter: chapterId, novel: novelId, unlockMethod: 'ad' });
+      console.debug('[recordAdWatch] already unlocked - logged ad and history', { adLogId: adLog && adLog._id, unlockHistoryId: unlockHist && unlockHist._id });
+
+      return res.status(200).json({
+        success: true,
+        message: 'Ad watch recorded (already unlocked)',
+        data: {
+          novelId,
+          chapterId,
+          alreadyUnlocked: true,
+          usedAdUnlocksToday: adCountToday + 1,
+          remainingAdUnlocksToday: Math.max(0, dailyLimit - adCountToday - 1),
+          recordedAt: new Date()
+        }
+      });
+    }
+
+    // Upsert ChapterAccess to unlock the chapter
+    const access = await ChapterAccess.findOneAndUpdate(
+      { user: userId, chapter: chapterId },
+      { user: userId, chapter: chapterId, novel: novelId, accessType: 'ad', accessedAt: new Date() },
+      { upsert: true, new: true }
+    );
+    console.debug('[recordAdWatch] ChapterAccess upserted', { accessId: access && access._id });
+
+    // Record ad unlock log and history
+    const adLog = await AdUnlockLog.create({ user: userId, novel: novelId, chapter: chapterId });
     const UnlockHistory = require('../models/unlockHistory');
-    await UnlockHistory.create({
-      user: userId,
-      chapter: chapterId,
-      novel: novelId,
-      unlockMethod: 'ad'
-    });
+    const unlockHist = await UnlockHistory.create({ user: userId, chapter: chapterId, novel: novelId, unlockMethod: 'ad' });
+    console.debug('[recordAdWatch] ad log & unlock history created', { adLogId: adLog && adLog._id, unlockHistoryId: unlockHist && unlockHist._id });
 
-    // Record writer earning for ad watch ONLY if:
-    // 1. Novel is paid
-    // 2. Chapter is provided and either:
-    //    - chapter is 6+ (paid chapter) OR
-    //    - chapter is sample (1-5) but has >1000 views
+    // Record writer earning for ad unlock when appropriate
     if (chapter && novel.pricingModel === 'paid') {
       try {
         const isSample = chapter.chapterNumber <= 5;
         const views = chapter.viewCount || 0;
         const shouldRecord = !isSample || (isSample && views > 1000);
+        console.debug('[recordAdWatch] ad earning decision', { chapterId, isSample, views, shouldRecord });
         if (shouldRecord) {
           const writerEarningController = require('./writerEarningController');
           await writerEarningController.recordAdEarning(novelId, chapter.author._id, chapterId, adType || 'ad');
-        } else {
-          console.log(`[earnings] skipped ad earning for chapter ${chapterId} (sample, views=${views})`);
+          console.debug('[recordAdWatch] recordAdEarning called');
         }
       } catch (e) {
         console.error('Error recording ad writer earning:', e && e.message);
       }
     }
 
-    res.status(200).json({
+    return res.status(200).json({
       success: true,
-      message: 'Ad watch recorded successfully',
+      message: 'Ad watch recorded and chapter unlocked successfully',
       data: {
         novelId,
         chapterId,
         usedAdUnlocksToday: adCountToday + 1,
         remainingAdUnlocksToday: Math.max(0, dailyLimit - adCountToday - 1),
+        unlockedAt: access && access.accessedAt,
         recordedAt: new Date()
       }
     });

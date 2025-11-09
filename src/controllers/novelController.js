@@ -216,11 +216,35 @@ exports.getDiscoverNovels = async (req, res) => {
         const baseMatch = { status: { $in: ['published', 'ongoing'] } };
         if (pricing !== 'all') baseMatch.pricingModel = pricing;
 
-        // Get latest releases (recently created novels)
-        const latestReleases = await Novel.find(baseMatch)
-            .select('title coverImage')
-            .sort({ createdAt: -1 })
-            .limit(latestLimit);
+        // Get latest releases (recently created novels) but only include novels with >=6 published chapters
+        const latestReleases = await Novel.aggregate([
+            { $match: baseMatch },
+            {
+                $lookup: {
+                    from: 'chapters',
+                    localField: '_id',
+                    foreignField: 'novel',
+                    as: 'chapters'
+                }
+            },
+            {
+                $addFields: {
+                    publishedChaptersCount: {
+                        $size: {
+                            $filter: {
+                                input: '$chapters',
+                                as: 'c',
+                                cond: { $eq: ['$$c.status', 'published'] }
+                            }
+                        }
+                    }
+                }
+            },
+            { $match: { publishedChaptersCount: { $gte: 6 } } },
+            { $sort: { createdAt: -1 } },
+            { $limit: latestLimit },
+            { $project: { title: 1, coverImage: 1 } }
+        ]);
 
         // Get most popular novels (based on favorites count)
         const mostPopular = await Novel.aggregate([
@@ -243,26 +267,98 @@ exports.getDiscoverNovels = async (req, res) => {
             { $project: { title: 1, coverImage: 1 } }
         ]);
 
-        // Get recommended novels (highest rated novels)
+        // Get recommended novels (highest rated novels) with >=6 published chapters
         const recommendedMatch = { ...baseMatch, averageRating: { $gte: 4.0 } };
-        const recommended = await Novel.find(recommendedMatch)
-            .select('title coverImage')
-            .sort({ averageRating: -1, totalReviews: -1 })
-            .limit(recommendedLimit);
+        const recommended = await Novel.aggregate([
+            { $match: recommendedMatch },
+            {
+                $lookup: {
+                    from: 'chapters',
+                    localField: '_id',
+                    foreignField: 'novel',
+                    as: 'chapters'
+                }
+            },
+            {
+                $addFields: {
+                    publishedChaptersCount: {
+                        $size: {
+                            $filter: {
+                                input: '$chapters',
+                                as: 'c',
+                                cond: { $eq: ['$$c.status', 'published'] }
+                            }
+                        }
+                    }
+                }
+            },
+            { $match: { publishedChaptersCount: { $gte: 6 } } },
+            { $sort: { averageRating: -1, totalReviews: -1 } },
+            { $limit: recommendedLimit },
+            { $project: { title: 1, coverImage: 1 } }
+        ]);
 
-        // Get premium (paid) novels
+        // Get premium (paid) novels with >=6 published chapters
         const premiumMatch = { status: { $in: ['published', 'ongoing'] }, pricingModel: 'paid' };
-        const premium = await Novel.find(premiumMatch)
-            .select('title coverImage')
-            .sort({ createdAt: -1 })
-            .limit(premiumLimit);
+        const premium = await Novel.aggregate([
+            { $match: premiumMatch },
+            {
+                $lookup: {
+                    from: 'chapters',
+                    localField: '_id',
+                    foreignField: 'novel',
+                    as: 'chapters'
+                }
+            },
+            {
+                $addFields: {
+                    publishedChaptersCount: {
+                        $size: {
+                            $filter: {
+                                input: '$chapters',
+                                as: 'c',
+                                cond: { $eq: ['$$c.status', 'published'] }
+                            }
+                        }
+                    }
+                }
+            },
+            { $match: { publishedChaptersCount: { $gte: 6 } } },
+            { $sort: { createdAt: -1 } },
+            { $limit: premiumLimit },
+            { $project: { title: 1, coverImage: 1 } }
+        ]);
 
-        // Get free novels
+        // Get free novels with >=6 published chapters
         const freeMatch = { status: { $in: ['published', 'ongoing'] }, pricingModel: 'free' };
-        const free = await Novel.find(freeMatch)
-            .select('title coverImage')
-            .sort({ createdAt: -1 })
-            .limit(freeLimit);
+        const free = await Novel.aggregate([
+            { $match: freeMatch },
+            {
+                $lookup: {
+                    from: 'chapters',
+                    localField: '_id',
+                    foreignField: 'novel',
+                    as: 'chapters'
+                }
+            },
+            {
+                $addFields: {
+                    publishedChaptersCount: {
+                        $size: {
+                            $filter: {
+                                input: '$chapters',
+                                as: 'c',
+                                cond: { $eq: ['$$c.status', 'published'] }
+                            }
+                        }
+                    }
+                }
+            },
+            { $match: { publishedChaptersCount: { $gte: 6 } } },
+            { $sort: { createdAt: -1 } },
+            { $limit: freeLimit },
+            { $project: { title: 1, coverImage: 1 } }
+        ]);
 
         // If user is logged in, add favorite status
         let favoritesMap = {};

@@ -27,7 +27,7 @@ exports.activateFreePlan = async (req, res) => {
         }
 
         // Get the premium plan (which is free for 1 month, then paid)
-        const premiumPlan = await SubscriptionPlan.findOne({ name: 'premium' });
+        const premiumPlan = await SubscriptionPlan.findOne({ id: req.planId });
         if (!premiumPlan) {
             return res.status(500).json({
                 success: false,
@@ -169,7 +169,7 @@ exports.getAvailablePlans = async (req, res) => {
             displayOrder: plan.displayOrder,
             razorpayPlanId: plan.razorpayPlanId,
             razorpaySubscriptionId: plan.razorpaySubscriptionId,
-            
+
         }));
 
         res.status(200).json({
@@ -632,6 +632,7 @@ exports.getFreeTrialEligibility = async (req, res) => {
     try {
         const writerId = req.user.id;
         const subscription = await WriterSubscription.findOne({ writer: writerId });
+        
 
         const now = new Date();
         const hasActiveTrial = !!(subscription && subscription.isFreeTrial && subscription.expiryDate && subscription.expiryDate > now);
@@ -646,7 +647,7 @@ exports.getFreeTrialEligibility = async (req, res) => {
             freeTrialUsedCount,
             // if active, useful metadata
             activeTrial: hasActiveTrial ? {
-                planId: subscription._id,
+                planId: subscription.currentPlan._id,
                 planName: (subscription.currentPlan && subscription.currentPlan.name) || 'premium',
                 expiryDate: subscription.expiryDate,
                 daysRemaining: subscriptionUtils.getDaysRemaining(subscription)
