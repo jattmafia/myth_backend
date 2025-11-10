@@ -145,30 +145,67 @@ exports.recordCoinEarning = async (novelId, writerId, chapterId, coinPrice) => {
       return;
     }
 
-    // Default coin price (₹ per unlock) if not provided
-    const defaultCoinPrice = parseFloat(process.env.COIN_PRICE) || 0.5; // ₹0.5 default
+    // Interpret the incoming coinPrice as the number of coins spent to unlock
+    // Coins -> rupee conversion: 1 ₹ == COINS_PER_RUPEE coins (default 2)
     const coinsPerRupee = parseFloat(process.env.COINS_PER_RUPEE) || 2; // 1 ₹ == 2 coins
-    const coinPriceRupee = typeof coinPrice === 'number' && coinPrice > 0 ? coinPrice : defaultCoinPrice;
+    const defaultCoinPriceRupee = parseFloat(process.env.COIN_PRICE) || 0.5; // ₹0.5 default
+
+    const coinsSpent = (typeof coinPrice === 'number' && coinPrice > 0) ? coinPrice : null;
+    // Compute rupee price from coinsSpent (if provided), otherwise fall back to default rupee price
+    const coinPriceRupee = coinsSpent ? (coinsSpent / coinsPerRupee) : defaultCoinPriceRupee;
+
+    console.log(`[recordCoinEarning] INPUT: coinPrice param = ${coinPrice}, coinsSpent = ${coinsSpent}, coinPriceRupee = ${coinPriceRupee}`);
 
     // Work in paise to preserve precision
     const coinPricePaise = Math.round(coinPriceRupee * 100);
     const writerEarningPaise = Math.round(coinPricePaise * (writerPercentage / 100));
 
-    // Coins required to unlock (based on coins per rupee)
-    const coinsRequiredToUnlock = Math.round(coinPriceRupee * coinsPerRupee);
+    // Coins required to unlock (if we were given coinsSpent use it, otherwise compute from rupee price)
+    const coinsRequiredToUnlock = coinsSpent ? coinsSpent : Math.round(coinPriceRupee * coinsPerRupee);
+
+    console.log(`[recordCoinEarning] CALCULATED: coinsSpent=${coinsSpent}, coinsRequiredToUnlock=${coinsRequiredToUnlock}, coinPriceRupee=${coinPriceRupee}`);
+
+    // DEBUG: Trace coin -> rupee conversion and earnings calculation
+    console.debug('[recordCoinEarning] TRACE', {
+      step: 'coin_to_rupee_conversion',
+      rawCoinParam: coinPrice,
+      coinsPerRupee,
+      coinsSpent,
+      coinPriceRupee,
+      coinPricePaise,
+      platformFee,
+      writerPercentage,
+      writerEarningPaise,
+      writerEarningRupees: (writerEarningPaise / 100).toFixed(2),
+      coinsRequiredToUnlock,
+      chapter: { number: chapter.chapterNumber, id: String(chapterId) },
+      writer: String(writerId)
+    });
+
+    // First, get existing count to calculate fresh amount
+    const existingRecord = await WriterEarning.findOne({
+      writer: writerId,
+      novel: novelId,
+      chapter: chapterId,
+      earningType: 'coin'
+    });
+
+    const newCount = (existingRecord?.count || 0) + 1;
+    const totalAmountPaise = writerEarningPaise * newCount; // Fresh calculation: amount = per-unlock earning * total unlocks
 
     await WriterEarning.findOneAndUpdate(
       { writer: writerId, novel: novelId, chapter: chapterId, earningType: 'coin' },
       {
-        $inc: { amount: writerEarningPaise, count: 1 },
         $set: {
+          amount: totalAmountPaise, // Recalculate fresh instead of $inc
+          count: newCount,
           hasSubscription,
           subscriptionId: subscription?._id || null,
           platformFeePercentage: platformFee,
           writerPercentageEarned: writerPercentage,
           viewsRequirementMet,
           totalViewsOnFreeChapters: totalFreeViews,
-          coinPrice: coinPriceRupee,
+          coinPrice: coinPriceRupee,  // Store in rupees (e.g., 1.5, not 150)
           coinsRequiredToUnlock,
           chapterNumber: chapter.chapterNumber
         }
@@ -176,7 +213,15 @@ exports.recordCoinEarning = async (novelId, writerId, chapterId, coinPrice) => {
       { upsert: true, new: true }
     );
 
-    console.log(`✅ Coin earning recorded: Writer ${writerId}, Amount(paise): ${writerEarningPaise}, (₹${(writerEarningPaise / 100).toFixed(2)}), Platform Fee: ${platformFee}%, Subscription: ${hasSubscription}`);
+    console.debug('[recordCoinEarning] STORED_VALUES', {
+      writerEarningPaise,
+      writerEarningRupees: (writerEarningPaise / 100).toFixed(2),
+      coinPrice_stored_as: coinPriceRupee,
+      coinsRequiredToUnlock,
+      coinRupeeValue: coinsSpent ? (coinsSpent / coinsPerRupee) : 'N/A'
+    });
+
+    console.log(`✅ Coin earning recorded: Writer ${writerId}, CoinsSpent: ${coinsSpent || coinsRequiredToUnlock}, Amount(paise): ${writerEarningPaise}, (₹${(writerEarningPaise / 100).toFixed(2)}), Platform Fee: ${platformFee}%, Subscription: ${hasSubscription}`);
   } catch (error) {
     console.error('Error recording coin earning:', error);
   }
@@ -255,11 +300,23 @@ exports.recordAdEarning = async (novelId, writerId, chapterId, adType = 'ad') =>
     // Each call to recordAdEarning represents a single unlock, so estimatedAmountPaise reflects one unlock.
     const estimatedAmountPaise = writerPerUnlockPaise;
 
+    // First, get existing count to calculate fresh amount
+    const existingAdRecord = await WriterEarning.findOne({
+      writer: writerId,
+      novel: novelId,
+      chapter: chapterId,
+      earningType: adType
+    });
+
+    const newAdCount = (existingAdRecord?.count || 0) + 1;
+    const totalAdAmountPaise = estimatedAmountPaise * newAdCount; // Fresh calculation
+
     await WriterEarning.findOneAndUpdate(
       { writer: writerId, novel: novelId, chapter: chapterId, earningType: adType },
       {
-        $inc: { count: 1, amount: estimatedAmountPaise },
         $set: {
+          count: newAdCount,
+          amount: totalAdAmountPaise, // Recalculate fresh instead of $inc
           hasSubscription,
           subscriptionId: subscription?._id || null,
           platformFeePercentage: platformFee,
@@ -388,6 +445,9 @@ exports.getWriterEarnings = async (req, res) => {
         const chapterNumberVal = e.chapter && typeof e.chapter.chapterNumber !== 'undefined' ? e.chapter.chapterNumber : null;
         const chapterTitleVal = e.chapter && e.chapter.title ? e.chapter.title : null;
 
+        // Coins to rupee conversion for display
+        const coinsPerRupee = parseFloat(process.env.COINS_PER_RUPEE) || 2;
+
         return {
           novelId: novelIdVal,
           novelTitle: novelTitleVal,
@@ -399,6 +459,8 @@ exports.getWriterEarnings = async (req, res) => {
           amount: (e.amount || 0) / 100,
           estimatedAdAmount,
           count: e.count,
+          // For coin earnings: show rupee equivalent of coins spent (2 coins = ₹1)
+          coinRupeeValue: e.earningType === 'coin' ? (e.coinsRequiredToUnlock ? (e.coinsRequiredToUnlock / coinsPerRupee) : (e.coinPrice || 0)) : null,
           // NEW FIELDS
           hasSubscription: e.hasSubscription,
           platformFeePercentage: e.platformFeePercentage,
@@ -412,7 +474,23 @@ exports.getWriterEarnings = async (req, res) => {
       })
     };
 
-    // Temporary debug log: prints the full payload that will be returned
+    // Detailed debug log: trace coin earnings conversion
+    console.debug('[getWriterEarnings] RESPONSE', {
+      totalEarnings,
+      byType: totalByType,
+      coinEarningsDetail: responseData.allEarnings
+        .filter(e => e.earningType === 'coin')
+        .map(e => ({
+          chapterId: String(e.chapterId),
+          coinsRequiredToUnlock: e.coinsRequiredToUnlock,
+          coinRupeeValue: e.coinRupeeValue,
+          coinPrice: e.coinPrice,
+          amount: e.amount,
+          writerPercentageEarned: e.writerPercentageEarned,
+          platformFeePercentage: e.platformFeePercentage
+        }))
+    });
+    console.log('[getWriterEarnings] Full response allEarnings:', JSON.stringify(responseData.allEarnings.filter(e => e.earningType === 'coin'), null, 2));
 
     res.status(200).json({ success: true, data: responseData });
 
