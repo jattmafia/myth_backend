@@ -443,7 +443,7 @@ exports.getFollowing = async (req, res) => {
 exports.rewardAdCoins = async (req, res) => {
   try {
     const userId = req.user.id;
-    const { coinsEarned = 2 } = req.body; // Default 2 coins per ad, can be customized
+    const { coinsEarned = 1 } = req.body; // Default 2 coins per ad, can be customized
 
     // Validate coins amount
     if (coinsEarned <= 0 || coinsEarned > 1000) {

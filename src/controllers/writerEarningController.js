@@ -475,23 +475,6 @@ exports.getWriterEarnings = async (req, res) => {
     };
 
     // Detailed debug log: trace coin earnings conversion
-    console.debug('[getWriterEarnings] RESPONSE', {
-      totalEarnings,
-      byType: totalByType,
-      coinEarningsDetail: responseData.allEarnings
-        .filter(e => e.earningType === 'coin')
-        .map(e => ({
-          chapterId: String(e.chapterId),
-          coinsRequiredToUnlock: e.coinsRequiredToUnlock,
-          coinRupeeValue: e.coinRupeeValue,
-          coinPrice: e.coinPrice,
-          amount: e.amount,
-          writerPercentageEarned: e.writerPercentageEarned,
-          platformFeePercentage: e.platformFeePercentage
-        }))
-    });
-    console.log('[getWriterEarnings] Full response allEarnings:', JSON.stringify(responseData.allEarnings.filter(e => e.earningType === 'coin'), null, 2));
-
     res.status(200).json({ success: true, data: responseData });
 
   } catch (error) {
